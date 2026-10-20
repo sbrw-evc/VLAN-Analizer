@@ -21,8 +21,9 @@ USERNAME = re.compile(r"[a-zA-Z0-9_.-]{1,64}")
 
 
 class Bao:
-    def __init__(self, settings):
+    def __init__(self, settings, role_id=None, secret_id=None):
         self.settings = settings
+        self.role_id, self.secret_id = role_id, secret_id
         self.client = httpx.AsyncClient(base_url=settings.bao_url, timeout=10, trust_env=False)
         self.token = None
         self.expiry = 0
@@ -32,7 +33,8 @@ class Bao:
         async with self.lock:
             if time.monotonic() >= self.expiry:
                 response = await self.client.post("/v1/auth/approle/login", json={
-                    "role_id": secret_file("BAO_ROLE_ID"), "secret_id": secret_file("BAO_SECRET_ID")})
+                    "role_id": self.role_id or secret_file("BAO_ROLE_ID"),
+                    "secret_id": self.secret_id or secret_file("BAO_SECRET_ID")})
                 response.raise_for_status()
                 auth = response.json()["auth"]
                 self.token = auth["client_token"]
@@ -47,9 +49,12 @@ class Bao:
         r.raise_for_status()
         return r.json()["data"]["data"]
 
-    async def write(self, path, data):
+    async def write(self, path, data, cas=None):
+        payload = {"data": data}
+        if cas is not None:
+            payload["options"] = {"cas": cas}
         r = await self.client.post(f"/v1/{self.settings.bao_mount}/data/vlan-analizer/{path}",
-                                   headers=await self.headers(), json={"data": data})
+                                   headers=await self.headers(), json=payload)
         r.raise_for_status()
 
 

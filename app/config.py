@@ -16,6 +16,7 @@ def secret_file(name: str) -> str:
 @dataclass
 class Settings:
     clickhouse_url: str = field(default_factory=lambda: os.getenv("CLICKHOUSE_URL", "http://127.0.0.1:8123"))
+    clickhouse_database: str = field(default_factory=lambda: os.getenv("CLICKHOUSE_DATABASE", "default"))
     clickhouse_user: str = field(default_factory=lambda: os.getenv("CLICKHOUSE_USER", "vlan"))
     bao_url: str = field(default_factory=lambda: os.getenv("BAO_ADDR", "http://127.0.0.1:8200"))
     bao_mount: str = field(default_factory=lambda: os.getenv("BAO_KV_MOUNT", "secret"))

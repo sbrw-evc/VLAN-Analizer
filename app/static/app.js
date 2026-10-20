@@ -17,6 +17,7 @@ async function start() {
   try {user = await api('/api/me'); $('identity').textContent = `${user.name || user.sub} · ${user.role}`;
     document.querySelectorAll('.admin').forEach(e => e.hidden = user.role !== 'admin');
     $('login').hidden = true; $('shell').hidden = false; await refresh();
+    if (user.role === 'admin') await window.Setup.loadConnections();
   } catch (e) { if (user) notice(e.message); }
 }
 async function refresh() {
@@ -119,4 +120,4 @@ $('user-form').addEventListener('submit',async e=>{e.preventDefault();const f=e.
 for(const [id,path] of [['run','/api/checks/run'],['sync','/api/gatus/sync'],['sync-kuma','/api/kuma/sync']]) $(id).addEventListener('click',async()=>{const b=$(id);b.disabled=true;try{const result=await api(path,{method:'POST'});await refresh();notice(result.queued?'Check cycle queued.':`Imported ${result.imported} sites. ${result.warnings.join(' · ')}`);}catch(e){notice(e.message);}finally{b.disabled=false;}});
 document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>$(b.dataset.close).close()));
 document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(t=>t.hidden=t.id!==b.dataset.tab);document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n===b));$('breadcrumb').textContent=b.dataset.tab==='overview'?'Overview':b.dataset.tab==='networks'?'Networks':'Administration';}));
-start();setInterval(()=>{if(user && !document.hidden)refresh();},15000);
+window.Setup.initialize(start);setInterval(()=>{if(user && !document.hidden)refresh();},15000);

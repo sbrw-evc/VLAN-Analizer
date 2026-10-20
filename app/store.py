@@ -33,7 +33,8 @@ def stamp():
 class Store:
     def __init__(self, settings, password):
         self.client = httpx.AsyncClient(base_url=settings.clickhouse_url,
-            auth=(settings.clickhouse_user, password), timeout=30, trust_env=False)
+            auth=(settings.clickhouse_user, password), timeout=30, trust_env=False,
+            params={"database": getattr(settings, "clickhouse_database", "default")})
 
     async def close(self):
         await self.client.aclose()

@@ -27,75 +27,34 @@ DNS, TCP и TLS используют сокеты с `SO_BINDTODEVICE` и исх
 
 Приложение видит настроенные VLAN и bridge membership. Оно не может определить все разрешённые VLAN на внешнем коммутаторе по одному trunk-интерфейсу и не выполняет перебор VLAN ID. Для untagged-интерфейса ID отображается как `Untagged / unknown`, а не предполагается VLAN 1. Для VLAN-aware bridge без отдельного адресованного L3-интерфейса на каждый VLAN индивидуальная проверка невозможна.
 
-## Запуск
+## Запуск и первоначальная настройка
 
-Требования: Linux x86_64/arm64 с поддержкой Docker/Chromium, Docker Compose v2, минимум 4 ГБ RAM для небольшой установки (потребление зависит от Chromium и числа параллельных проверок). Запускайте только доверенные сайты: браузер скачивает их ресурсы и выполняет JavaScript.
-
-### 1. Получить код и настроить окружение
+Production Compose загружает готовый образ **GitHub Container Registry**. В `.env` задаются только версия образа и параметры сетевых проверок; подключения настраиваются в браузере.
 
 ```bash
 git clone https://github.com/sbrw-evc/VLAN-Analizer.git
 cd VLAN-Analizer
 cp .env.example .env
-python3 deploy/prepare.py
-docker compose build app
-docker compose up -d clickhouse openbao
-```
-
-В `.env` задайте:
-
-- `PUBLIC_URL`: точный origin приложения, например `https://vlan.example.com`, без завершающего `/`. Он используется и для callback Entra ID, и для защиты операций записи от CSRF.
-- `INTERFACES`: явный список **L3** интерфейсов, например `eno1.10,eno1.20`. Пустое значение проверяет все подходящие интерфейсы, включая возможные Docker bridge/veth — предпочтительнее явный список.
-- `VLAN_DNS`: JSON с доступными DNS для каждого интерфейса. Пример: `{"eno1.10":["192.168.10.1"],"eno1.20":["192.168.20.1"]}`. Использовать системный stub `127.0.0.53` для проверки DNS через удалённый VLAN нельзя. Для интерфейсов без записи используется IPv4 nameserver из `/etc/resolv.conf`; он должен быть достижим через этот интерфейс.
-
-### 2. Инициализировать и разблокировать OpenBao
-
-```bash
-docker compose exec openbao bao operator init
-docker compose exec openbao bao operator unseal
-```
-
-Сохраните recovery/unseal-материалы и initial root token в вашем защищённом хранилище. Выполните `unseal` с необходимым числом различных ключей, указанным при инициализации. При новом запуске OpenBao его требуется снова разблокировать; для автоматического unseal подключите ваш KMS согласно документации OpenBao.
-
-Это **persistent server**, не dev mode. Данные OpenBao остаются в named volume `bao_data`. Не удаляйте его вместе с секретами. В комплекте односерверное file storage без HA; HTTP OpenBao и ClickHouse опубликован только на loopback хоста. Для внешних экземпляров используйте HTTPS и доверенные CA.
-
-### 3. Создать AppRole, секреты приложения и первого администратора
-
-```bash
-docker run --rm -it --network host \
-  -e SECRETS_DIR=/bootstrap-secrets \
-  -v "$PWD/secrets:/bootstrap-secrets" \
-  vlan-analizer:local python deploy/bootstrap.py
-```
-
-Скрипт интерактивно запросит provisioning token OpenBao, имя/пароль администратора и необязательный Entra client secret. Токены и пароли не выводятся. Runtime получает AppRole RoleID/SecretID из файлов Docker secrets; root token приложению не передаётся. После настройки отзовите временный provisioning/root token в рамках вашей политики OpenBao.
-
-Файлы `secrets/bao_role_id` и `secrets/bao_secret_id` — минимальные bootstrap-credentials доступа к OpenBao. `secrets/clickhouse_password` требуется entrypoint ClickHouse; его копия хранится в KV приложения. Эти файлы исключены из git и создаются с правами `0600`; защищайте каталог и резервные копии. Все локальные пароли хранятся **только как Argon2id-хеши в OpenBao**, не в ClickHouse и не в `.env`.
-
-Скрипт рассчитан на первоначальную настройку пустого приложения, не на повторную ротацию существующей установки.
-
-### 4. Запустить приложение
-
-```bash
+docker compose pull app
 docker compose up -d app
-docker compose ps
-docker compose logs --tail=100 app
+docker compose exec app cat /var/lib/vlan-analizer/setup-token
 ```
 
-Приложение слушает `127.0.0.1:8000`. Настройте ваш HTTPS reverse proxy; пример в [deploy/nginx.conf.example](deploy/nginx.conf.example). Для Nginx Proxy Manager в отдельном bridge-контейнере `127.0.0.1` обозначает сам NPM: настройте доступ к сервису хоста осознанно либо используйте host-network proxy. Не публикуйте ClickHouse/OpenBao наружу.
+Если GHCR package закрыт, предварительно выполните `docker login ghcr.io`; для анонимного скачивания владелец должен сделать package публичным.
 
-Для локальной приёмки допустимо временно задать `PUBLIC_URL=http://localhost:8000` и открыть именно этот origin на самом хосте. Для доступа через браузер другого компьютера используйте HTTPS reverse proxy с настроенным публичным origin.
+Откройте приложение через HTTPS reverse proxy (пример `deploy/nginx.conf.example`). Мастер проведёт через OpenBao, ClickHouse, создание администратора и опциональную Entra ID. В новой установке OpenBao должен быть инициализирован/unsealed, а ClickHouse и его база — подготовлены; приложение может запуститься до них и дождаться настройки. После установки Gatus, Kuma MySQL/MariaDB и Entra ID редактируются в **Administration** без перезапуска.
 
-Войдите локальным администратором и добавьте первый сайт. Проверьте раздел **Networks**, затем матрицу. Кнопка **Run checks** ставит новый полный цикл в очередь; цикл не запускается параллельно самому себе.
+- [Пошаговая установка, bundled-сервисы и обновление старых установок](docs/setup.md)
+- [Автоматические релизы, GHCR, установка и обновление из готового образа](docs/releases.md)
+
+Для локальных ClickHouse/OpenBao есть профиль `bundled`; для source build — `compose.dev.yaml`. Нужны Linux и rootful Docker. Неправильная маршрутизация хоста не исправляется мастером; проверьте `INTERFACES`, `VLAN_DNS`, шлюзы и policy routing.
 
 ## Entra ID
 
 1. Создайте single-tenant App Registration.
-2. Добавьте Web redirect URI: `https://vlan.example.com/auth/entra/callback`.
-3. Создайте app roles со значениями **`VLAN.Admin`** и **`VLAN.Viewer`**, доступные пользователям/группам.
-4. Назначьте роли пользователям в Enterprise Applications. Одна принадлежность tenant не даёт доступ.
-5. Укажите `ENTRA_TENANT_ID` (UUID) и `ENTRA_CLIENT_ID` в `.env`, client secret — в `secret/vlan-analizer/app` через `bao kv patch`. Не храните его в git или `.env`.
-6. Пересоздайте контейнер приложения после изменения окружения; после изменения app-секретов перезапустите его.
+2. Добавьте Web redirect URI, показанный в мастере/Administration.
+3. Создайте app roles **`VLAN.Admin`** и **`VLAN.Viewer`** и назначьте их пользователям в Enterprise Applications.
+4. Введите Tenant ID, Client ID и Client Secret в мастере или **Administration → Microsoft Entra ID** и сохраните. Проверка tenant discovery не заменяет реальный тест входа.
 
 Сессия — HttpOnly SameSite=Lax cookie, Secure при HTTPS, до 8 часов. OIDC flow cookie действует 10 минут. Обновление/отключение локального пользователя немедленно инвалидирует его сессии при следующем обращении. Изменение назначения роли Entra применяется при следующем входе или по истечении текущей сессии; для немедленного массового отзыва смените `session_key` и перезапустите приложение.
 
@@ -105,11 +64,9 @@ docker compose logs --tail=100 app
 
 ### API self-hosted Gatus
 
-```dotenv
-GATUS_URL=https://status.example.com
-```
+В **Administration → Gatus connection** включите импорт и укажите `https://status.example.com` в API server URL.
 
-Импортируется `/api/v1/endpoints/statuses`; Bearer при необходимости берётся из `gatus_token` в OpenBao. Набор импортируемых URL зависит от версии и настроек Gatus. Hosted Gatus API имеет другой контракт и в эту версию не включён.
+Импортируется `/api/v1/endpoints/statuses`; Bearer задаётся в форме и сохраняется в OpenBao. Набор импортируемых URL зависит от версии и настроек Gatus. Hosted Gatus API имеет другой контракт и в эту версию не включён.
 
 ### YAML Gatus
 
@@ -120,9 +77,7 @@ GATUS_URL=https://status.example.com
 - /opt/gatus/config.yaml:/config/gatus.yaml:ro
 ```
 
-```dotenv
-GATUS_CONFIG=/config/gatus.yaml
-```
+В **Administration → Gatus connection** укажите `/config/gatus.yaml` в Mounted YAML file вместо API URL.
 
 ```yaml
 endpoints:
@@ -139,7 +94,7 @@ YAML имеет приоритет над API. Импортируются тол
 
 ## Uptime Kuma: импорт из MySQL/MariaDB
 
-Добавлены кнопка **Sync Kuma**, endpoint `POST /api/kuma/sync` и автоматическая синхронизация источника. Читаются HTTP-мониторы из таблицы `monitor` Uptime Kuma 2.x; учитываются паузы мониторов/родительских групп, локальные паузы сохраняются. Доступ к БД — read-only; пароль хранится в OpenBao как `kuma_mysql_password`. История и результаты проверок Kuma не импортируются — приложение проверяет сайты самостоятельно из VLAN.
+Добавлены кнопка **Sync Kuma**, endpoint `POST /api/kuma/sync` и автоматическая синхронизация источника. Читаются HTTP-мониторы из таблицы `monitor` Uptime Kuma 2.x; учитываются паузы мониторов/родительских групп, локальные паузы сохраняются. Доступ к БД — read-only; пароль и параметры подключения сохраняются через Administration в OpenBao. История и результаты проверок Kuma не импортируются — приложение проверяет сайты самостоятельно из VLAN.
 
 Подробная настройка подключения, TLS, SQL-права и правила обновления: [docs/kuma.md](docs/kuma.md).
 
@@ -173,7 +128,7 @@ YAML имеет приоритет над API. Импортируются тол
 - `/healthz` — процесс жив; `/readyz` — доступны ClickHouse/OpenBao и нет последней ошибки цикла. Зависший/долгий сбор дополнительно виден по freshness результатов.
 - Один app-контейнер, один Uvicorn worker на один хост. Несколько реплик сейчас будут дублировать проверки; distributed leader election не реализован.
 - Для внутренних CA добавьте сертификаты в образ и обновите системное CA-хранилище; настройте trust store Chromium отдельно и проверьте его на вашей CA. Не отключайте проверку TLS для удобства.
-- Секреты `app` кэшируются до перезапуска процесса. AppRole самостоятельно повторяет вход после истечения lease. Ротация `SecretID` требует обновления Docker secret и пересоздания контейнера.
+- Bootstrap app-секреты кэшируются до перезапуска; изменения интеграций через UI применяются сразу. AppRole повторяет вход после истечения lease. Ротация SecretID выполняется оператором с обновлением защищённого bootstrap-файла.
 - Резервируйте ClickHouse и OpenBao вместе с recovery-материалами. `docker compose down -v` удалит данные; для остановки используйте `docker compose stop`.
 
 Подробная инструкция для Zabbix: [docs/zabbix.md](docs/zabbix.md). Проверки перед вводом в эксплуатацию: [docs/acceptance.md](docs/acceptance.md).
@@ -189,9 +144,9 @@ ruff check app deploy tests
 pytest -q
 ```
 
-Три runtime-теста выполняются отдельно: `RUN_BROWSER_TESTS=1` с установленным Chromium и `RUN_STORAGE_TESTS=1` с тестовыми ClickHouse/OpenBao, `RUN_KUMA_TESTS=1` с disposable MariaDB (адреса и disposable credentials описаны в `tests/test_runtime.py`). GitHub Actions устанавливает Chromium, проверяет UI с явно синтетическими API fixtures, реальные HTTP/browser-пробы, хранение в ClickHouse/OpenBao, read-only импорт из MariaDB и Docker build. Тесты **никогда не запускайте против рабочей БД/OpenBao**, они создают/изменяют тестовую конфигурацию.
+Четыре runtime-теста выполняются отдельно: `RUN_BROWSER_TESTS=1` с установленным Chromium и `RUN_STORAGE_TESTS=1` с тестовыми ClickHouse/OpenBao, `RUN_KUMA_TESTS=1` с disposable MariaDB и `RUN_SETUP_TESTS=1` для мастера/перезапуска (адреса и disposable credentials описаны в `tests/test_runtime.py`). GitHub Actions устанавливает Chromium, проверяет UI с явно синтетическими API fixtures, реальные HTTP/browser-пробы, хранение в ClickHouse/OpenBao, read-only импорт из MariaDB и Docker build. Тесты **никогда не запускайте против рабочей БД/OpenBao**, они создают/изменяют тестовую конфигурацию.
 
-При первоначальной локальной проверке в среде разработки: **36 passed, 3 runtime-теста skipped**. Docker Engine недоступен, netlink запрещён политикой среды, Chromium не удалось скачать. Полный Compose, UI в браузере и runtime-тесты требуют выполнения CI/приёмки на целевом Linux-хосте; успех этих проверок здесь не заявлен.
+При первоначальной локальной проверке в среде разработки: **48 passed, 4 runtime-теста skipped**. Docker Engine недоступен, netlink запрещён политикой среды, Chromium не удалось скачать. Полный Compose, UI в браузере и runtime-тесты требуют выполнения CI/приёмки на целевом Linux-хосте; успех этих проверок здесь не заявлен.
 
 ## Основные официальные источники
 

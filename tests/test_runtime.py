@@ -124,3 +124,47 @@ async def test_real_kuma_mysql_readonly_import():
                 cursor.execute("DELETE FROM monitor WHERE id = 4")
     finally:
         reader.close()
+
+
+@pytest.mark.skipif(not os.getenv("RUN_SETUP_TESTS"), reason="Enable RUN_SETUP_TESTS with disposable storage services")
+def test_real_setup_restart_and_connection_settings(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    monkeypatch.setenv("APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("INTERFACES", "not-present")
+    monkeypatch.delenv("BAO_ROLE_ID_FILE", raising=False)
+    monkeypatch.delenv("BAO_SECRET_ID_FILE", raising=False)
+    payload = {"public_url": "http://testserver", "bao": {"url": "http://127.0.0.1:8200", "mode": "token",
+        "token": "integration-test-token"}, "clickhouse": {"url": "http://127.0.0.1:8123", "user": "vlan",
+        "password": "integration-test-password", "database": "default"},
+        "admin_username": "setup-admin", "admin_password": "long-integration-admin-password", "entra": {"enabled": False}}
+    with TestClient(app) as client:
+        assert client.get("/api/setup/status").json()["required"] is True
+        assert client.get("/readyz").status_code == 503
+        headers = {"Origin": "http://testserver", "X-Setup-Token": (tmp_path / "setup-token").read_text()}
+        assert client.post("/api/setup/test/openbao", json=payload["bao"], headers=headers).status_code == 200
+        result = client.post("/api/setup/complete", json=payload, headers=headers)
+        assert result.status_code == 200, result.text
+        assert result.json()["ready"] is True
+        assert not (tmp_path / "setup-token").exists()
+        assert client.post("/auth/local", json={"username": "setup-admin", "password": payload["admin_password"]}, headers=headers).status_code == 200
+        initial = client.get("/api/settings/connections")
+        assert initial.status_code == 200
+        assert payload["clickhouse"]["password"] not in initial.text
+        kuma = {"enabled": True, "host": "127.0.0.1", "port": 3307, "database": "kuma", "user": "vlan_reader",
+                "password": "integration-kuma-password", "tls": False, "ca": "", "instance": "wizard-test"}
+        result = client.post("/api/settings/connections/kuma/test", json=kuma, headers=headers)
+        assert result.status_code == 200 and result.json()["sites"] == 2, result.text
+        saved = client.put("/api/settings/connections/kuma", json=kuma, headers=headers)
+        assert saved.status_code == 200 and saved.json()["kuma"]["password_set"], saved.text
+        assert kuma["password"] not in saved.text
+        assert client.post("/api/setup/complete", json=payload, headers=headers).status_code == 409
+    with TestClient(app) as client:
+        status = client.get("/api/setup/status").json()
+        assert status["required"] is False and status["ready"] is True
+        headers = {"Origin": "http://testserver"}
+        assert client.post("/auth/local", json={"username": "setup-admin", "password": payload["admin_password"]}, headers=headers).status_code == 200
+        settings = client.get("/api/settings/connections").json()
+        assert settings["kuma"]["host"] == "127.0.0.1" and settings["kuma"]["password_set"]
+        assert app.state.settings.kuma_port == 3307
+        assert not settings["entra"]["enabled"]
