@@ -1,6 +1,9 @@
 .env
 /bin/
 /node_modules/
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
 /coverage.out
 /test-results/
 /playwright-report/

@@ -4,6 +4,8 @@ services:
     image: vlan-analizer:dev
   bootstrap:
     image: vlan-analizer:dev
+  netagent:
+    image: vlan-analizer:dev
   app:
     image: vlan-analizer:dev
     build: .

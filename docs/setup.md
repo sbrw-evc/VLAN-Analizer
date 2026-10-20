@@ -14,13 +14,13 @@ Setup verifies the storage connections and writes installation metadata atomical
 
 ## Settings after installation
 
-Sign in and open **Administration**. Monitoring settings include interface selection, IPv4 DNS overrides, interval, concurrent site/interface checks, timeout, stale threshold and browser probing. Leave interfaces unselected to use eligible interfaces automatically. Each DNS line uses `interface=192.0.2.53,192.0.2.54` syntax. DNS requests bind to that interface too; a loopback system resolver may be unreachable through a VLAN, in which case enter a reachable resolver.
+Sign in and open **Administration**. **Monitoring** includes interface selection, IPv4 DNS overrides, interval, concurrent site/interface checks, timeout, stale threshold and browser probing. Leave interfaces unselected to use eligible interfaces automatically. Add a DNS override per interface with up to four IPv4 resolvers. DNS requests bind to that interface too; a loopback system resolver may be unreachable through a VLAN, in which case enter a reachable resolver.
 
-Connection forms configure Gatus, Kuma MySQL/MariaDB and Entra ID. Test and save are separate actions. Empty password/token/secret fields preserve saved values, and read responses expose only credential-presence flags. These settings are stored in OpenBao. The initial OpenBao/ClickHouse endpoints are installation settings; changing the storage topology of an existing installation requires a planned data migration.
+**Connections** configures Gatus, Kuma MySQL/MariaDB and Entra ID. Test and save are separate actions. Empty password/token/secret fields preserve saved values, and read responses expose only credential-presence flags. These settings are stored in OpenBao. The initial OpenBao/ClickHouse endpoints are installation settings; changing the storage topology of an existing installation requires a planned data migration.
 
 ## Bundled service lifecycle
 
-Compose starts a Go initialization job, persistent ClickHouse and OpenBao, a Go bootstrap helper and the application. Random credentials are generated once. The helper initializes OpenBao, stores recovery material in the bootstrap volume, creates a restricted AppRole, revokes its initial root token, and automatically unseals OpenBao after a restart. The application independently retries dependency activation during startup.
+Compose starts a Go initialization job, persistent ClickHouse and OpenBao, a Go bootstrap helper, the privileged host network agent (`netagent`, see [VLAN interfaces](vlans.md)) and the application. Random credentials are generated once. The helper initializes OpenBao, stores recovery material in the bootstrap volume, creates a restricted AppRole, revokes its initial root token, and automatically unseals OpenBao after a restart. The application independently retries dependency activation during startup.
 
 Protect the host and named volumes. The managed bootstrap volume contains unseal material and AppRole credentials, so it belongs in the same access-control and backup boundary as OpenBao. This is an unattended local deployment model, not external KMS auto-unseal. For independent key management, select external OpenBao in the wizard.
 

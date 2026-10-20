@@ -1,6 +1,6 @@
 # Architecture and design review
 
-The v0.3 backend replaces the Python application, preparation scripts, browser driver and probes with Go. HTML/CSS/JavaScript remain browser assets, and Node/Playwright are used only for UI testing. Chromium remains a separate browser process.
+The backend, probes and host network agent are Go. The web app is React + Vite in `web/`, built in its own Docker stage and embedded into the Go binary; Node is not part of the runtime image. Chromium remains a separate browser process.
 
 ## Boundaries
 
@@ -13,6 +13,9 @@ The v0.3 backend replaces the Python application, preparation scripts, browser d
 | Network diagnostics and browser | `probes.go`, `proxy.go` | `Prober`, `Browser` |
 | External website sources | `importers.go` | `Importer` |
 | Scheduling and dashboard snapshots | `worker.go` | Injected repository, inventory and probe interfaces |
+| VLAN interface API | `vlans.go` | `HostNetwork` (agent client over a Unix socket) |
+| Host network agent | `internal/hostnet` | `Host` (commands and files in the host namespaces), `Backend` per persistence format |
+| Web app | `web/src` | REST API under `/api`, session cookie |
 
 Go expresses object-oriented design through structs, methods and composition. Components depend on small interfaces at their consumption boundaries; inheritance and a class hierarchy are unnecessary. Interface adapters can be replaced by test doubles without emulating HTTP or SQL internals.
 

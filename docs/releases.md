@@ -13,6 +13,6 @@ Stable image tags include `vX.Y.Z`, `X.Y.Z`, `X.Y` and `latest`. Prerelease tags
 
 The public package is `ghcr.io/sbrw-evc/vlan-analizer`. Package visibility must remain public so a fresh installation can pull anonymously. GitHub Actions uses the repository `GITHUB_TOKEN` with `contents:write` and `packages:write` only in the publish job. No personal access token is required by the workflow or the installer.
 
-The runtime image contains a native Go binary, Chromium, iproute2, traceroute, CA roots and tini. It contains no application Python interpreter or Python dependencies. Development UI tests use Node/Playwright outside the runtime image.
+The runtime image contains a native Go binary with the embedded web app, Chromium, iproute2, traceroute, CA roots and tini. The React app is built by a Node stage of the Dockerfile; neither Node nor Python is part of the runtime image. Development UI tests use Node/Playwright outside the runtime image.
 
 For local development, use `compose.dev.yaml` together with the standard Compose file. The production Compose file always pulls the published image and requires no source checkout or local build.

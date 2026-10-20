@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/sbrw-evc/VLAN-Analizer/internal/app"
+	"github.com/sbrw-evc/VLAN-Analizer/internal/hostnet"
 )
 
 func env(key, fallback string) string {
@@ -19,6 +21,12 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// hostPID is the host process whose namespaces netagent enters (NETAGENT_HOST_PID, default 1).
+func hostPID() int {
+	pid, _ := strconv.Atoi(env("NETAGENT_HOST_PID", "1"))
+	return pid
 }
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -50,6 +58,11 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	case "netagent":
+		if e := hostnet.Serve(ctx, env("AGENT_SOCKET", hostnet.DefaultSocket), hostnet.NewManager(hostnet.NewNamespaceHost(hostPID()))); e != nil {
+			log.Fatal(e)
+		}
+		return
 	case "version":
 		fmt.Println(app.Version)
 		return
@@ -58,6 +71,7 @@ func main() {
 	if e != nil {
 		log.Fatal("configuration could not be loaded: ", e)
 	}
+	application.SetHostNetwork(hostnet.NewClient(env("NETWORK_AGENT_SOCKET", hostnet.DefaultSocket)))
 	application.Start(ctx)
 	server := &http.Server{Addr: env("APP_LISTEN", ":8000"), Handler: application.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 120 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 << 10}
 	go func() {
