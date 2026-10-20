@@ -79,6 +79,7 @@ jobs:
         run: |
           mkdir -p test-results
           docker compose -p vlan-ci -f /tmp/vlan-fresh-install/compose.yaml -f /tmp/vlan-fresh-install/override.yaml logs --no-color > test-results/compose.log 2>&1 || true
+          tail -n 100 test-results/compose.log
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

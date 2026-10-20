@@ -125,9 +125,8 @@ jobs:
           const {VERSION:version,IMAGE:image,IMAGE_DIGEST:digest}=process.env;
           const path='release-assets/compose.yaml';
           fs.writeFileSync(path,fs.readFileSync(path,'utf8').replace(':-latest}',':-'+version+'}'));
-          fs.writeFileSync('release-notes.md',`## Docker package\n\n\`${image}:${version}\`\n\nPlatforms: Linux amd64 and arm64.\n\nDigest: \`${digest}\`\n\nDownload \`compose.yaml\` and run \`docker compose up -d\`. Open http://your-linux-host:8000 and complete the browser wizard. No .env, host preparation scripts, database passwords or OpenBao CLI steps are required.\n\nThis release replaces the Python runtime with Go, adds bounded concurrent probing and moves monitoring parameters into Administration. Documentation is in English.\n\n`);
+          fs.writeFileSync('release-notes.md',`## Docker package\n\n\`${image}:${version}\`\n\nPlatforms: Linux amd64 and arm64.\n\nDigest: \`${digest}\`\n\nDownload \`compose.yaml\` and run \`docker compose up -d\`. Open http://your-linux-host:8000 and complete the browser wizard. No .env, host preparation scripts, database passwords or OpenBao CLI steps are required.\n\nThe documentation archive is optional; compose.yaml is sufficient for installation.\n\n`);
           JS
-          cp release-assets/compose.yaml compose-release.yaml
           tar -czf vlan-analizer-install.tar.gz -C release-assets .
           cp release-assets/compose.yaml compose.yaml
           sha256sum compose.yaml vlan-analizer-install.tar.gz > SHA256SUMS

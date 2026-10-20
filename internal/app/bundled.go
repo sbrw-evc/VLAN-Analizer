@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -114,6 +115,7 @@ func ensureBundle(ctx context.Context, dir, baoURL, chURL string) error {
 	return atomicJSON(filepath.Join(dir, "managed.json"), seed.Managed)
 }
 func RunBundle(ctx context.Context, dir, baoURL, chURL string) error {
+	lastError := ""
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -121,8 +123,13 @@ func RunBundle(ctx context.Context, dir, baoURL, chURL string) error {
 		e := ensureBundle(iteration, dir, baoURL, chURL)
 		cancel()
 		if e == nil {
+			lastError = ""
 			_ = os.WriteFile(filepath.Join(dir, "ready"), []byte(time.Now().UTC().Format(time.RFC3339)), 0600)
 		} else {
+			if e.Error() != lastError {
+				log.Printf("managed services are not ready: %s", e)
+				lastError = e.Error()
+			}
 			_ = os.Remove(filepath.Join(dir, "ready"))
 		}
 		select {

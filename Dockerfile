@@ -1,4 +1,4 @@
-FROM golang:1.27.3-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -6,7 +6,9 @@ COPY VERSION ./
 COPY cmd ./cmd
 COPY internal ./internal
 COPY web ./web
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/sbrw-evc/VLAN-Analizer/internal/app.Version=$(cat VERSION)" -o /vlan-analizer ./cmd/vlan-analizer
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/sbrw-evc/VLAN-Analizer/internal/app.Version=$(cat VERSION)" -o /vlan-analizer ./cmd/vlan-analizer
 
 FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/sbrw-evc/VLAN-Analizer"

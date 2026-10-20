@@ -92,7 +92,7 @@ services:
     cap_add: [NET_RAW]
     security_opt: [no-new-privileges:true]
     read_only: true
-    tmpfs: [/tmp:size=1G,mode=1777]
+    tmpfs: ["/tmp:size=1G,mode=1777"]
     shm_size: 256mb
     healthcheck:
       test: [CMD, vlan-analizer, health]
