@@ -164,7 +164,9 @@ func (k KumaImporter) Fetch(ctx context.Context) ([]Site, []string, error) {
 	cfg.WriteTimeout = 10 * time.Second
 	cfg.AllowNativePasswords = true
 	cfg.AllowCleartextPasswords = false
-	cfg.Params = map[string]string{"charset": "utf8mb4"}
+	if e := cfg.Apply(mysql.Charset("utf8mb4", "")); e != nil {
+		return nil, nil, e
+	}
 	if c.TLS {
 		roots, e := x509.SystemCertPool()
 		if e != nil {

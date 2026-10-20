@@ -102,7 +102,10 @@ func ensureBundle(ctx context.Context, dir, baoURL, chURL string) error {
 		}
 	}
 	if seed.Root != "" {
-		_, _ = call("POST", "auth/token/revoke-self", seed.Root, nil, nil)
+		code, e := call("POST", "auth/token/revoke-self", seed.Root, nil, nil)
+		if e != nil && code != http.StatusForbidden {
+			return e
+		}
 		seed.Root = ""
 		if e := atomicJSON(path, seed); e != nil {
 			return e
