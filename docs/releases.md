@@ -6,7 +6,7 @@ The pipeline:
 
 1. Validates version metadata and checks whether the release exists.
 2. Runs the reusable CI workflow: Go formatting/vet/race tests, real Chromium, MariaDB read-only import, clean Compose installation, browser wizard and restart persistence.
-3. Builds and publishes `linux/amd64` and `linux/arm64` images to GHCR.
+3. Builds and publishes the `linux/amd64` image to GHCR. ARM hosts are not supported.
 4. Publishes a GitHub Release with generated change notes, image digest, standalone `compose.yaml`, an optional documentation archive and `SHA256SUMS`.
 
 Stable image tags include `vX.Y.Z`, `X.Y.Z`, `X.Y` and `latest`. Prerelease tags do not update `latest`. The release Compose asset defaults directly to its version; `.env` is optional and may contain only an image-version override.
