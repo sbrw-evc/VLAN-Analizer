@@ -1,0 +1,24 @@
+[project]
+name = "vlan-analizer"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1", "httpx>=0.28,<1",
+  "dnspython>=2.7,<3", "PyJWT[crypto]>=2.10,<3", "argon2-cffi>=23.1,<26",
+  "playwright==1.58.0", "PyYAML>=6,<7", "PyMySQL[rsa]>=1.2.3,<2"
+]
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+[tool.ruff]
+line-length = 110
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools.packages.find]
+include = ["app*"]
+[tool.setuptools.package-data]
+app = ["static/*"]
