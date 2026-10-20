@@ -81,7 +81,7 @@ docker compose -f compose.yaml -f compose.dev.yaml up -d --build
 
 GitHub Actions validates formatting, static analysis, the web app's types, translations and build, race tests, source-bound sockets, real Chromium, a read-only MariaDB importer, the complete browser wizard and persistence after an OpenBao/application restart. UI tests use Node.js and Playwright. Docker integration tests run on Linux GitHub runners.
 
-Changing `VERSION` on `main` triggers validation, multi-platform GHCR image publication, generated release notes and standalone Compose release assets. See [release workflow](docs/releases.md).
+Changing `VERSION` on `main` triggers validation, linux/amd64 GHCR image publication, generated release notes and standalone Compose release assets. See [release workflow](docs/releases.md).
 
 - [Setup and security model](docs/setup.md)
 - [VLAN interfaces on trunk ports](docs/vlans.md)
