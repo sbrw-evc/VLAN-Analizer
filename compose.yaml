@@ -1,21 +1,16 @@
 services:
   app:
-    image: vlan-analizer:local
-    build: .
+    image: ghcr.io/sbrw-evc/vlan-analizer:${VLAN_ANALIZER_VERSION:-latest}
     network_mode: host
     restart: unless-stopped
     init: true
     env_file: .env
     environment:
-      BAO_ROLE_ID_FILE: /run/secrets/bao_role_id
-      BAO_SECRET_ID_FILE: /run/secrets/bao_secret_id
-      CLICKHOUSE_URL: http://127.0.0.1:8123
-      CLICKHOUSE_USER: vlan
-      BAO_ADDR: http://127.0.0.1:8200
-    secrets: [bao_role_id, bao_secret_id]
+      APP_DATA_DIR: /var/lib/vlan-analizer
     volumes:
+      - app_data:/var/lib/vlan-analizer
       - /etc/resolv.conf:/etc/resolv.conf:ro
-      # Add a read-only Gatus config mount here and set GATUS_CONFIG if needed.
+      # Optional read-only Gatus YAML / private CA mounts go here.
     cap_drop: [ALL]
     cap_add: [NET_RAW]
     security_opt: [no-new-privileges:true]
@@ -28,12 +23,8 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 60s
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-      openbao:
-        condition: service_started
   clickhouse:
+    profiles: [bundled]
     image: clickhouse/clickhouse-server:25.8
     restart: unless-stopped
     ports: ["127.0.0.1:8123:8123"]
@@ -56,6 +47,7 @@ services:
       timeout: 5s
       retries: 10
   openbao:
+    profiles: [bundled]
     image: openbao/openbao:2.4.4
     command: [server, -config=/openbao/config/bao.hcl]
     restart: unless-stopped
@@ -67,13 +59,10 @@ services:
       - ./deploy/bao.hcl:/openbao/config/bao.hcl:ro
       - bao_data:/openbao/file
 volumes:
+  app_data:
   clickhouse_data:
   clickhouse_logs:
   bao_data:
 secrets:
   clickhouse_password:
     file: ./secrets/clickhouse_password
-  bao_role_id:
-    file: ./secrets/bao_role_id
-  bao_secret_id:
-    file: ./secrets/bao_secret_id

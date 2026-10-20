@@ -1,4 +1,5 @@
 FROM python:3.12-slim-bookworm
+LABEL org.opencontainers.image.source="https://github.com/sbrw-evc/VLAN-Analizer"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
 WORKDIR /opt/vlan-analizer
 RUN apt-get update && apt-get install -y --no-install-recommends iproute2 curl traceroute ca-certificates tini && rm -rf /var/lib/apt/lists/*

@@ -11,43 +11,27 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.auth import Auth, Bao, sanitized_user
-from app.config import Settings
+from app.auth import sanitized_user
+from app.connections import FORMS, public_connections
+from app.installation import (BaoForm, ClickHouseForm, Installation, SetupForm, test_bao, test_clickhouse)
 from app.gatus import validate_url
-from app.service import Service
-from app.store import Store, site_enabled
+from app.store import site_enabled
 
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app):
-    settings = Settings()
-    bao = Bao(settings)
-    store = None
-    task = None
+    installation = Installation(app)
+    app.state.installation = installation
     try:
-        app_secrets = await bao.read("app")
-        if not app_secrets:
-            raise RuntimeError("OpenBao app secret is missing; run bootstrap")
-        auth = Auth(settings, bao, app_secrets)
-        store = Store(settings, app_secrets["clickhouse_password"])
-        await store.init()
-        service = Service(store, settings, auth)
-        app.state.auth, app.state.store, app.state.service = auth, store, service
-        app.state.settings = settings
-        task = asyncio.create_task(service.loop())
+        await installation.start()
         yield
     finally:
-        if task:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        if store:
-            await store.close()
-        await bao.client.aclose()
+        await installation.close()
 
 
-app = FastAPI(title="VLAN Analizer", version="0.1.0", lifespan=lifespan,
+app = FastAPI(title="VLAN Analizer", version="0.2.0", lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 static = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static), name="static")
@@ -55,7 +39,12 @@ app.mount("/static", StaticFiles(directory=static), name="static")
 
 @app.middleware("http")
 async def headers(request, call_next):
-    response = await call_next(request)
+    installation = getattr(request.app.state, "installation", None)
+    protected = request.url.path.startswith(("/api/", "/auth/")) and not request.url.path.startswith("/api/setup/")
+    if installation and not installation.ready and protected:
+        response = JSONResponse({"detail": "Complete initial setup or restore configured dependencies"}, status_code=503)
+    else:
+        response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Content-Security-Policy"] = (
@@ -77,12 +66,82 @@ async def health():
 
 @app.get("/readyz")
 async def ready(request: Request):
+    installation = getattr(request.app.state, "installation", None)
+    if installation and not installation.ready:
+        raise HTTPException(503, "Setup required or dependencies unavailable")
     await request.app.state.store.query("SELECT 1")
     await request.app.state.auth.bao.read("app")
     service = request.app.state.service
     if service.error:
         raise HTTPException(503, "Monitoring cycle failed")
     return {"status": "ready"}
+
+
+@app.get("/api/setup/status")
+async def setup_status(request: Request):
+    return request.app.state.installation.status()
+
+
+@app.post("/api/setup/test/openbao")
+async def setup_test_bao(body: BaoForm, request: Request):
+    request.app.state.installation.authorize_setup(request)
+    try:
+        return await test_bao(body)
+    except Exception:
+        raise HTTPException(502, "OpenBao connection failed; check URL, seal status, credentials and permissions") from None
+
+
+@app.post("/api/setup/test/clickhouse")
+async def setup_test_ch(body: ClickHouseForm, request: Request):
+    request.app.state.installation.authorize_setup(request)
+    try:
+        return await test_clickhouse(body)
+    except Exception:
+        raise HTTPException(502, "ClickHouse connection failed; check URL, database and credentials") from None
+
+
+@app.post("/api/setup/complete")
+async def setup_complete(body: SetupForm, request: Request):
+    installation = request.app.state.installation
+    installation.authorize_setup(request)
+    try:
+        return await installation.complete(body)
+    except HTTPException:
+        raise
+    except Exception:
+        log.warning("Initial setup failed; configuration remains protected")
+        raise HTTPException(502, "Setup could not finish. Check connections, credentials and write/schema permissions; retry with the same settings") from None
+
+
+@app.get("/api/settings/connections")
+async def get_connections(request: Request):
+    await request.app.state.auth.admin(request)
+    installation = request.app.state.installation
+    return public_connections(installation.connections, request.app.state.settings.public_url)
+
+
+async def change_connection(source, body, request, test_only=False):
+    request.app.state.auth.check_origin(request)
+    await request.app.state.auth.admin(request)
+    if source not in FORMS:
+        raise HTTPException(404, "Unknown integration")
+    try:
+        form = FORMS[source].model_validate(body)
+        return await request.app.state.installation.update_connection(source, form, test_only)
+    except (ValueError, TypeError):
+        raise HTTPException(422, "Invalid integration settings or missing credential") from None
+    except Exception:
+        raise HTTPException(502, "Integration connection or save failed; check credentials, permissions and server settings") from None
+
+
+@app.put("/api/settings/connections/{source}")
+async def save_connection(source: str, body: dict, request: Request):
+    return await change_connection(source, body, request)
+
+
+@app.post("/api/settings/connections/{source}/test")
+async def test_saved_connection(source: str, body: dict, request: Request):
+    return await change_connection(source, body, request, test_only=True)
 
 
 class Login(BaseModel):
