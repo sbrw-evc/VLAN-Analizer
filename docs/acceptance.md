@@ -18,4 +18,4 @@ Disable an imported monitor in Kuma and synchronize to confirm source pause hand
 
 Installation does not require diagnostic commands. If a service cannot start, `docker compose ps` and `docker compose logs --tail=100` provide lifecycle information. `/healthz` reports that HTTP is running; `/readyz` requires completed setup, reachable ClickHouse and a successful monitoring cycle. Before the wizard completes, the application container can report unhealthy while the setup page remains available.
 
-Loopback ports `18123` and `18200` and application port `8000` must be free. Preserve named volumes when restarting. If OpenBao cannot unseal, verify that the original bootstrap and OpenBao volumes belong to the same deployment. Do not delete one volume as a troubleshooting shortcut.
+Application port `8000` must be free. Management services publish no host ports; the helper refreshes their internal bridge address map automatically. Preserve named volumes when restarting. If OpenBao cannot unseal, verify that the original bootstrap and OpenBao volumes belong to the same deployment. Do not delete one volume as a troubleshooting shortcut.

@@ -7,15 +7,39 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
+// managementDial reaches bundled services through the host's existing internal
+// bridge route. Reserved service aliases never fall back to external DNS.
+func managementDial(ctx context.Context, network, address string) (net.Conn, error) {
+	if address == "managed-openbao:8200" || address == "managed-clickhouse:8123" {
+		file := os.Getenv("MANAGED_ADDRESS_FILE")
+		if file == "" {
+			file = "/bootstrap/addresses.json"
+		}
+		var addresses map[string]string
+		if e := readJSON(file, &addresses); e != nil {
+			return nil, errors.New("managed service addresses unavailable")
+		}
+		target := addresses[address]
+		host, _, e := net.SplitHostPort(target)
+		if e != nil || net.ParseIP(host) == nil {
+			return nil, errors.New("invalid managed service address")
+		}
+		address = target
+	}
+	dial := net.Dialer{Timeout: 8 * time.Second}
+	return dial.DialContext(ctx, network, address)
+}
 func httpClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: &http.Transport{Proxy: nil, MaxIdleConns: 64, MaxIdleConnsPerHost: 16}}
+	return &http.Client{Timeout: timeout, Transport: &http.Transport{Proxy: nil, DialContext: managementDial, MaxIdleConns: 64, MaxIdleConnsPerHost: 16}}
 }
 func decodeJSON(data []byte, out any) error {
 	d := json.NewDecoder(bytes.NewReader(data))

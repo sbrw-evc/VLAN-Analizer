@@ -122,3 +122,33 @@ func TestProxyCloseCancelsTunnels(t *testing.T) {
 		t.Fatal("hijacked connection remained open")
 	}
 }
+
+func TestManagedHTTPUsesProtectedAddressMap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "managed-service") }))
+	defer server.Close()
+	target, _ := url.Parse(server.URL)
+	file := t.TempDir() + "/addresses.json"
+	t.Setenv("MANAGED_ADDRESS_FILE", file)
+	if e := atomicJSON(file, map[string]string{"managed-openbao:8200": target.Host}); e != nil {
+		t.Fatal(e)
+	}
+	client := httpClient(time.Second)
+	response, e := client.Get("http://managed-openbao:8200/v1/sys/seal-status")
+	if e != nil {
+		t.Fatal(e)
+	}
+	response.Body.Close()
+	if response.StatusCode != 200 {
+		t.Fatal(response.StatusCode)
+	}
+	// Replacing the map changes subsequent connections and never attempts DNS on
+	// a reserved alias when its mapping is missing.
+	if e := atomicJSON(file, map[string]string{}); e != nil {
+		t.Fatal(e)
+	}
+	client.CloseIdleConnections()
+	if response, e = client.Get("http://managed-openbao:8200/"); e == nil {
+		response.Body.Close()
+		t.Fatal("missing mapping did not fail closed")
+	}
+}

@@ -52,7 +52,7 @@ ClickHouse stores website definitions and time series: checks expire after 90 da
 
 The bundled OpenBao uses persistent file storage, not development mode. To support unattended startup, its unseal material is stored in the protected bootstrap volume. The initial root token is revoked after provisioning. This convenience mode does not separate unseal keys from the host; protect and back up all application, bootstrap, OpenBao and ClickHouse volumes together. The wizard also supports externally managed OpenBao for deployments requiring separate key custody.
 
-Management ports are bound only to host loopback (`18123` for ClickHouse, `18200` for OpenBao). The application listens on port `8000`. It uses host networking and `NET_RAW`, with other application capabilities dropped. For HTTPS use a reverse proxy and enter the public HTTPS origin in the wizard; an example is in `deploy/nginx.conf.example`.
+Management services stay on an internal Docker bridge with no published ports. The bootstrap helper discovers their addresses; host-network application clients use that protected address map through the host’s bridge route. The application listens on port `8000`. It uses host networking and `NET_RAW`, with other application capabilities dropped. For HTTPS use a reverse proxy and enter the public HTTPS origin in the wizard; an example is in `deploy/nginx.conf.example`.
 
 Update by downloading the new release Compose file into the existing deployment directory and running `docker compose up -d`. Keep the same directory/project name to reuse named volumes. Back up volumes before version upgrades. `docker compose down` preserves data; `docker compose down -v` deletes it.
 

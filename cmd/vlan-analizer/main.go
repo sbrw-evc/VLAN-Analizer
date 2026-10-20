@@ -36,7 +36,7 @@ func main() {
 		}
 		return
 	case "bootstrap":
-		if e := app.RunBundle(ctx, bundle, env("BUNDLE_BAO_URL", "http://openbao:8200"), env("BUNDLE_CH_URL", "http://127.0.0.1:18123")); e != nil {
+		if e := app.RunBundle(ctx, bundle, env("BUNDLE_BAO_URL", "http://openbao:8200"), env("BUNDLE_CH_URL", "http://clickhouse:8123")); e != nil {
 			log.Fatal(e)
 		}
 		return

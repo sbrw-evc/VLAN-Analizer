@@ -63,12 +63,15 @@ jobs:
           test ! -f .env
           docker compose -p vlan-ci -f compose.yaml -f override.yaml config --quiet
           docker compose -p vlan-ci -f compose.yaml -f override.yaml up -d
+          docker cp "$(docker compose -p vlan-ci -f compose.yaml -f override.yaml ps -q app)":/bootstrap/addresses.json /tmp/vlan-managed-addresses.json
+          curl -fsS "http://$(jq -r '.["managed-openbao:8200"]' /tmp/vlan-managed-addresses.json)/v1/sys/seal-status"
+          curl -fsS "http://$(jq -r '.["managed-clickhouse:8123"]' /tmp/vlan-managed-addresses.json)/ping"
       - run: npm run test:ui
       - name: Verify real ClickHouse and OpenBao round trips
         run: |
           docker cp "$(docker compose -p vlan-ci -f /tmp/vlan-fresh-install/compose.yaml -f /tmp/vlan-fresh-install/override.yaml ps -q app)":/bootstrap/managed.json /tmp/vlan-managed-test.json
-          MANAGED_TEST_CONFIG=/tmp/vlan-managed-test.json go test -v ./internal/app -run TestManagedStorageIntegration
-          rm -f /tmp/vlan-managed-test.json
+          MANAGED_ADDRESS_FILE=/tmp/vlan-managed-addresses.json MANAGED_TEST_CONFIG=/tmp/vlan-managed-test.json go test -v ./internal/app -run TestManagedStorageIntegration
+          rm -f /tmp/vlan-managed-test.json /tmp/vlan-managed-addresses.json
       - name: Restart storage and application
         run: |
           cd /tmp/vlan-fresh-install

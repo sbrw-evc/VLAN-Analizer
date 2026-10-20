@@ -33,6 +33,8 @@ A bounded worker pool schedules one job per active website/interface pair. The c
 
 Contexts bound network requests, subprocesses, browser navigation and shutdown. Long-lived monitoring uses the application process context, never the setup HTTP request context. A queued wake-up coalesces repeated scan requests, cycles do not overlap, import reconciliation is serialized, and measurements are written in batches of up to 64. Configuration snapshots are protected by a read/write mutex and replaced as whole values.
 
+Bundled storage stays on an internal Docker bridge without published ports. The bootstrap helper resolves service IPs and atomically refreshes a protected address map. HTTP clients translate reserved managed aliases to those IPs through the host bridge route; missing mappings fail without an external DNS fallback. Container address changes are picked up on new connections.
+
 The OpenBao token cache and OIDC provider cache have separate locks. Argon2 login work has a fixed capacity and login attempts are rate limited. CONNECT tunnels are tracked and closed when their per-check proxy shuts down. DNS and all outgoing probe sockets use the selected source/interface; an interface error is propagated rather than retried through the default route.
 
 Concurrent code is checked with `go test -race`. Integration CI exercises real Chromium, MariaDB column-level SELECT access, bundled storage, browser setup and automatic unsealing after restart. No numeric performance gain is claimed without a representative deployment benchmark.

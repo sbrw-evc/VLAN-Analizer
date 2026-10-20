@@ -22,7 +22,6 @@ services:
     restart: unless-stopped
     environment:
       CLICKHOUSE_SKIP_USER_SETUP: "1"
-    ports: ["127.0.0.1:18123:8123"]
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_users:/etc/clickhouse-server/users.d:ro
@@ -43,7 +42,6 @@ services:
     restart: unless-stopped
     environment:
       BAO_LOCAL_CONFIG: '{"ui":false,"disable_mlock":true,"storage":{"file":{"path":"/openbao/file"}},"listener":{"tcp":{"address":"0.0.0.0:8200","tls_disable":true}},"api_addr":"http://127.0.0.1:8200"}'
-    ports: ["127.0.0.1:18200:8200"]
     volumes:
       - bao_data:/openbao/file
     networks: [management]
@@ -54,8 +52,7 @@ services:
     environment:
       BUNDLE_DIR: /bootstrap
       BUNDLE_BAO_URL: http://openbao:8200
-      BUNDLE_APP_BAO_URL: http://127.0.0.1:18200
-      BUNDLE_CH_URL: http://127.0.0.1:18123
+      BUNDLE_CH_URL: http://clickhouse:8123
     volumes:
       - bootstrap_data:/bootstrap
     depends_on:

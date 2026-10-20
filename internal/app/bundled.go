@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -37,6 +39,28 @@ func PrepareBundle(dir, users string) error {
 	}
 	xml := fmt.Sprintf(`<clickhouse><users><default><networks replace="replace"><ip>127.0.0.1</ip><ip>::1</ip></networks></default><vlan><password_sha256_hex>%s</password_sha256_hex><networks><ip>::/0</ip></networks><profile>default</profile><quota>default</quota><access_management>0</access_management></vlan></users></clickhouse>`, digest(seed.Password))
 	return os.WriteFile(filepath.Join(users, "vlan.xml"), []byte(xml), 0644)
+}
+
+// The helper resolves Docker service names from inside the isolated bridge.
+// Host-network application clients read this atomically replaced routing map.
+func managedAddresses(ctx context.Context, dir, baoURL, chURL string) error {
+	addresses := map[string]string{}
+	for alias, raw := range map[string]string{"managed-openbao:8200": baoURL, "managed-clickhouse:8123": chURL} {
+		u, e := url.Parse(raw)
+		if e != nil {
+			return e
+		}
+		ips, e := net.DefaultResolver.LookupNetIP(ctx, "ip4", u.Hostname())
+		if e != nil || len(ips) == 0 {
+			return errors.New("managed service discovery failed")
+		}
+		port := u.Port()
+		if port == "" {
+			port = "80"
+		}
+		addresses[alias] = net.JoinHostPort(ips[0].String(), port)
+	}
+	return atomicJSON(filepath.Join(dir, "addresses.json"), addresses)
 }
 func ensureBundle(ctx context.Context, dir, baoURL, chURL string) error {
 	var seed BundleSeed
@@ -93,11 +117,8 @@ func ensureBundle(ctx context.Context, dir, baoURL, chURL string) error {
 		if e != nil {
 			return e
 		}
-		role.URL = os.Getenv("BUNDLE_APP_BAO_URL")
-		if role.URL == "" {
-			role.URL = "http://127.0.0.1:18200"
-		}
-		seed.Managed = &ManagedConfig{ID: seed.ID, Bao: role, ClickHouse: CHConfig{URL: chURL, User: "vlan", Database: "default", Password: seed.Password, Managed: true}}
+		role.URL = "http://managed-openbao:8200"
+		seed.Managed = &ManagedConfig{ID: seed.ID, Bao: role, ClickHouse: CHConfig{URL: "http://managed-clickhouse:8123", User: "vlan", Database: "default", Password: seed.Password, Managed: true}}
 		if e = atomicJSON(path, seed); e != nil {
 			return e
 		}
@@ -111,6 +132,9 @@ func ensureBundle(ctx context.Context, dir, baoURL, chURL string) error {
 		if e := atomicJSON(path, seed); e != nil {
 			return e
 		}
+	}
+	if e := managedAddresses(ctx, dir, baoURL, chURL); e != nil {
+		return e
 	}
 	return atomicJSON(filepath.Join(dir, "managed.json"), seed.Managed)
 }
