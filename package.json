@@ -1,1 +1,1 @@
-{"private":true,"type":"module","scripts":{"test:ui":"node tests/ui_smoke.mjs"},"devDependencies":{"playwright":"1.58.0"}}
+{"private":true,"type":"module","scripts":{"test:ui":"node tests/ui_smoke.mjs","test:vlans":"node tests/vlan_e2e.mjs"},"devDependencies":{"playwright":"1.58.0"}}

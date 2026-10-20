@@ -9,7 +9,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -86,6 +86,38 @@ jobs:
           cd /tmp/vlan-fresh-install
           docker compose -p vlan-ci -f compose.yaml -f override.yaml restart openbao app
       - run: MODE=verify npm run test:ui
+      - name: Prepare a disposable trunk for VLAN tests
+        run: |
+          # A process in its own network and mount namespaces holds a bridge named trunk0. The runner's netplan and
+          # ifupdown files are hidden there, so netagent uses the runtime backend and never touches the runner's network.
+          sudo modprobe 8021q
+          sudo setsid unshare --net --mount --propagation private sh -c '
+            if [ -d /etc/netplan ]; then mount -t tmpfs tmpfs /etc/netplan; fi
+            if [ -d /etc/network ]; then mount -t tmpfs tmpfs /etc/network; fi
+            ip link set lo up
+            ip link add trunk0 type bridge
+            ip link set trunk0 up
+            echo $$ > /tmp/vlan-netns.pid
+            exec sleep 3600' > /tmp/vlan-netns.log 2>&1 < /dev/null &
+          for attempt in $(seq 1 20); do test -s /tmp/vlan-netns.pid && break; sleep 0.5; done
+          cat /tmp/vlan-netns.log
+          sudo nsenter -t "$(cat /tmp/vlan-netns.pid)" -n ip -br link
+          cat > /tmp/vlan-fresh-install/agent.yaml <<YAML
+          services:
+            netagent:
+              environment:
+                NETAGENT_HOST_PID: "$(cat /tmp/vlan-netns.pid)"
+          YAML
+          cd /tmp/vlan-fresh-install
+          docker compose -p vlan-ci -f compose.yaml -f override.yaml -f agent.yaml up -d netagent
+      - name: Create, change and delete real VLAN interfaces in the browser
+        run: npm run test:vlans
+      - name: Verify the kernel and host files after deletion
+        run: |
+          pid="$(cat /tmp/vlan-netns.pid)"
+          if sudo nsenter -t "$pid" -n ip link show trunk0.20; then echo 'trunk0.20 survived deletion' >&2; exit 1; fi
+          test "$(sudo jq '.interfaces | length' /etc/vlan-analizer/vlans.json)" = 0
+          test ! -e /etc/sysctl.d/90-vlan-analizer.conf
       - name: Collect diagnostic logs
         if: failure()
         run: |
@@ -102,3 +134,5 @@ jobs:
         run: |
           docker compose -p vlan-ci -f /tmp/vlan-fresh-install/compose.yaml -f /tmp/vlan-fresh-install/override.yaml down -v || true
           docker rm -f test-kuma-db || true
+          if [ -s /tmp/vlan-netns.pid ]; then sudo kill "$(cat /tmp/vlan-netns.pid)" || true; fi
+          sudo rm -rf /etc/vlan-analizer /etc/sysctl.d/90-vlan-analizer.conf

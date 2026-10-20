@@ -125,7 +125,7 @@ jobs:
           const {VERSION:version,IMAGE:image,IMAGE_DIGEST:digest}=process.env;
           const path='release-assets/compose.yaml';
           fs.writeFileSync(path,fs.readFileSync(path,'utf8').replace(':-latest}',':-'+version+'}'));
-          fs.writeFileSync('release-notes.md',`## Docker package\n\n\`${image}:${version}\`\n\nPlatforms: Linux amd64 and arm64.\n\nDigest: \`${digest}\`\n\nDownload \`compose.yaml\` and run \`docker compose up -d\`. Open http://your-linux-host:8000 and complete the browser wizard. No .env, host preparation scripts, database passwords or OpenBao CLI steps are required.\n\nThe documentation archive is optional; compose.yaml is sufficient for installation.\n\n`);
+          fs.writeFileSync('release-notes.md',`## Docker package\n\n\`${image}:${version}\`\n\nPlatforms: Linux amd64 and arm64.\n\nDigest: \`${digest}\`\n\nDownload \`compose.yaml\` and run \`docker compose up -d\`. Open http://your-linux-host:8000 and complete the browser wizard. No .env, host preparation scripts, database passwords or OpenBao CLI steps are required.\n\nThe \`netagent\` service runs privileged with the host PID namespace to create and persist VLAN interfaces through netplan, NetworkManager, ifupdown or network-scripts (Debian, Ubuntu, CentOS, RHEL). It has no network and is reachable only through a socket shared with the application; remove it from compose.yaml to disable VLAN management. See docs/vlans.md in the documentation archive.\n\nThe documentation archive is optional; compose.yaml is sufficient for installation.\n\n`);
           JS
           tar -czf vlan-analizer-install.tar.gz -C release-assets .
           cp release-assets/compose.yaml compose.yaml
