@@ -3,11 +3,11 @@ on:
   push:
     branches: [main]
     tags: ['v[0-9]*']
-    paths: [pyproject.toml, '.github/workflows/release.yml']
+    paths: [VERSION, '.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version, for example v0.2.0 (must match pyproject.toml)'
+        description: 'Release version, for example v0.3.0 (must match VERSION)'
         required: true
         type: string
 permissions:
@@ -33,23 +33,17 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          python - <<'PY'
-          import os, re, subprocess, tomllib
-          with open('pyproject.toml', 'rb') as stream:
-              project = tomllib.load(stream)['project']['version']
-          version = os.environ['INPUT_VERSION'] or (os.environ['GITHUB_REF_NAME'] if os.environ['GITHUB_REF_TYPE'] == 'tag' else 'v' + project)
-          if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?', version):
-              raise SystemExit('Use a semantic version such as v0.2.0 or v0.2.0-rc.1')
-          if version.split('-')[0][1:] != project:
-              raise SystemExit('Release tag must match the project version')
-          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-          if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
-              main = subprocess.check_output(['git', 'rev-parse', 'origin/main'], text=True).strip()
-              if sha != main:
-                  raise SystemExit('Manual releases must run against the current main branch')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
-              stream.write(f'version={version}\nimage=ghcr.io/{os.environ["REPOSITORY"].lower()}\nsha={sha}\nprerelease={str("-" in version).lower()}\n')
-          PY
+          node <<'JS'
+          const fs=require('fs'), cp=require('child_process');
+          const project=fs.readFileSync('VERSION','utf8').trim();
+          const env=process.env;
+          const version=env.INPUT_VERSION || (env.GITHUB_REF_TYPE==='tag'?env.GITHUB_REF_NAME:'v'+project);
+          if(!/^v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(version))throw new Error('Use a semantic version such as v0.3.0');
+          if(version.split('-')[0].slice(1)!==project)throw new Error('Release tag must match VERSION');
+          const sha=cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          if(env.GITHUB_EVENT_NAME==='workflow_dispatch' && sha!==cp.execFileSync('git',['rev-parse','origin/main'],{encoding:'utf8'}).trim())throw new Error('Manual releases must use current main');
+          fs.appendFileSync(env.GITHUB_OUTPUT,`version=${version}\nimage=ghcr.io/${env.REPOSITORY.toLowerCase()}\nsha=${sha}\nprerelease=${version.includes('-')}\n`);
+          JS
       - id: existing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -123,25 +117,23 @@ jobs:
           TARGET_SHA: ${{ needs.validate.outputs.sha }}
         run: |
           mkdir release-assets
-          cp compose.yaml .env.example release-assets/
+          cp compose.yaml release-assets/compose.yaml
           cp README.md release-assets/README.md
           cp -r docs release-assets/docs
-          mkdir -p release-assets/deploy
-          cp deploy/prepare.py deploy/bao.hcl deploy/bao-policy.hcl release-assets/deploy/
-          python - <<'PY'
-          import os, pathlib
-          version, image, digest = (os.environ[k] for k in ('VERSION', 'IMAGE', 'IMAGE_DIGEST'))
-          path = pathlib.Path('release-assets/.env.example')
-          path.write_text(path.read_text().replace('VLAN_ANALIZER_VERSION=latest', 'VLAN_ANALIZER_VERSION='+version))
-          pathlib.Path('release-assets/IMAGE.txt').write_text(f'{image}:{version}\n{image}@{digest}\n')
-          pathlib.Path('release-notes.md').write_text(f'## Docker package\n\n`{image}:{version}`\n\nPlatforms: Linux amd64 and arm64.\n\nDigest: `{digest}`\n\nDownload `vlan-analizer-install.tar.gz`, extract it, copy `.env.example` to `.env`, then run `docker compose pull && docker compose up -d`. Initial OpenBao/ClickHouse/admin/Entra setup runs in the browser. See README for bundled services and setup access key.\n\n')
-          PY
+          node <<'JS'
+          const fs=require('fs');
+          const {VERSION:version,IMAGE:image,IMAGE_DIGEST:digest}=process.env;
+          const path='release-assets/compose.yaml';
+          fs.writeFileSync(path,fs.readFileSync(path,'utf8').replace(':-latest}',':-'+version+'}'));
+          fs.writeFileSync('release-notes.md',`## Docker package\n\n\`${image}:${version}\`\n\nPlatforms: Linux amd64 and arm64.\n\nDigest: \`${digest}\`\n\nDownload \`compose.yaml\` and run \`docker compose up -d\`. Open http://your-linux-host:8000 and complete the browser wizard. No .env, host preparation scripts, database passwords or OpenBao CLI steps are required.\n\nThe documentation archive is optional; compose.yaml is sufficient for installation.\n\n`);
+          JS
           tar -czf vlan-analizer-install.tar.gz -C release-assets .
-          sha256sum vlan-analizer-install.tar.gz > SHA256SUMS
+          cp release-assets/compose.yaml compose.yaml
+          sha256sum compose.yaml vlan-analizer-install.tar.gz > SHA256SUMS
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo 'Release already exists; refusing to replace published assets.' >&2
             exit 1
           fi
           release_args=()
           if [ '${{ needs.validate.outputs.prerelease }}' = true ]; then release_args+=(--prerelease); fi
-          gh release create "$VERSION" vlan-analizer-install.tar.gz SHA256SUMS --target "$TARGET_SHA" --title "VLAN Analizer $VERSION" --generate-notes --notes-file release-notes.md "${release_args[@]}"
+          gh release create "$VERSION" compose.yaml vlan-analizer-install.tar.gz SHA256SUMS --target "$TARGET_SHA" --title "VLAN Analizer $VERSION" --generate-notes --notes-file release-notes.md "${release_args[@]}"

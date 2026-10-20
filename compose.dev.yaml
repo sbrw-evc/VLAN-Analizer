@@ -1,5 +1,9 @@
-# Explicit opt-in source build; production compose.yaml only pulls from GHCR.
+# Development only. Production deployment needs compose.yaml alone.
 services:
+  prepare:
+    image: vlan-analizer:dev
+  bootstrap:
+    image: vlan-analizer:dev
   app:
     image: vlan-analizer:dev
     build: .

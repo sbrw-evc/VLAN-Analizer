@@ -1,60 +1,18 @@
-# Релизы и Docker-пакеты в GitHub
+# Releases and Docker packages
 
-`.github/workflows/release.yml` выполняет полный CI, собирает `linux/amd64` + `linux/arm64`, публикует образ в GHCR и создаёт GitHub Release с автоматически сформированным списком изменений, адресом/digest образа, установочным архивом Compose и SHA-256 checksum.
+`VERSION` is the canonical application version. Update it in a pull request and merge into `main` to trigger `.github/workflows/release.yml`. Tags and manual dispatch are also supported; their version must match `VERSION`, and manual releases must use current `main`. Existing published versions are never replaced.
 
-## Запуск
+The pipeline:
 
-- После изменения версии в `pyproject.toml` и слияния в `main` создаётся стабильный релиз `v<version>`.
-- Можно запустить workflow вручную через **Actions → Release and publish Docker package → Run workflow**, указав версию и текущую ветку `main`.
-- Поддерживается push тега `vX.Y.Z` / `vX.Y.Z-rc.N` (также alpha/beta). Версия без суффикса должна совпадать с `pyproject.toml`.
-- Уже существующий релиз пропускается: его файлы не заменяются. Для новой публикации измените версию. Повторный запуск после неуспешной публикации до создания Release может повторно отправить образ той же версии.
+1. Validates version metadata and checks whether the release exists.
+2. Runs the reusable CI workflow: Go formatting/vet/race tests, real Chromium, MariaDB read-only import, clean Compose installation, browser wizard and restart persistence.
+3. Builds and publishes `linux/amd64` and `linux/arm64` images to GHCR.
+4. Publishes a GitHub Release with generated change notes, image digest, standalone `compose.yaml`, an optional documentation archive and `SHA256SUMS`.
 
-Публикация использует встроенный `GITHUB_TOKEN` с `packages:write` и `contents:write` только в publish job. Отдельные Docker Hub credentials или сторонний registry не нужны. Job проверки имеет только чтение репозитория. Для запуска необходимы включённые GitHub Actions и разрешение публикации packages в настройках владельца/организации.
+Stable image tags include `vX.Y.Z`, `X.Y.Z`, `X.Y` and `latest`. Prerelease tags do not update `latest`. The release Compose asset defaults directly to its version; `.env` is optional and may contain only an image-version override.
 
-## Теги образа
+The public package is `ghcr.io/sbrw-evc/vlan-analizer`. Package visibility must remain public so a fresh installation can pull anonymously. GitHub Actions uses the repository `GITHUB_TOKEN` with `contents:write` and `packages:write` only in the publish job. No personal access token is required by the workflow or the installer.
 
-Для версии `v0.2.0`:
+The runtime image contains a native Go binary, Chromium, iproute2, traceroute, CA roots and tini. It contains no application Python interpreter or Python dependencies. Development UI tests use Node/Playwright outside the runtime image.
 
-```text
-ghcr.io/sbrw-evc/vlan-analizer:v0.2.0
-ghcr.io/sbrw-evc/vlan-analizer:0.2.0
-ghcr.io/sbrw-evc/vlan-analizer:0.2
-ghcr.io/sbrw-evc/vlan-analizer:latest
-```
-
-Prerelease публикуется отдельным тегом и не обновляет `latest`/стабильный minor. Рекомендуется фиксировать точную версию в `.env`, а для строгой воспроизводимости — digest в собственном Compose override.
-
-Новый GHCR package может по умолчанию иметь private visibility, даже в публичном репозитории. Для анонимного `docker compose pull` владелец должен включить **Public** в Package settings; иначе выполните `docker login ghcr.io` с аккаунтом, имеющим доступ и токеном `read:packages`. Это настройка доступа пакета GitHub, а не самого приложения. Не сохраняйте registry token в репозитории или `.env` приложения.
-
-## Установка из релиза
-
-Скачайте `vlan-analizer-install.tar.gz` и `SHA256SUMS` из GitHub Release:
-
-```bash
-sha256sum -c SHA256SUMS
-tar -xzf vlan-analizer-install.tar.gz
-cp .env.example .env
-docker compose pull app
-docker compose up -d app
-```
-
-В архиве `.env.example` уже фиксирует версию этого релиза. Далее используйте браузерный мастер из `docs/setup.md`.
-
-## Обновление
-
-Сделайте резервные копии persistent volumes, поменяйте `VLAN_ANALIZER_VERSION` в `.env`, затем:
-
-```bash
-docker compose pull app
-docker compose up -d app
-```
-
-Настройки и секреты сохраняются в persistent volume/OpenBao, а история — в ClickHouse. `docker compose down -v` удаляет volumes и для обновления не нужен. Обратный переход версии допускайте только при совместимости схем/формата настроек.
-
-## Локальная разработка
-
-Production `compose.yaml` не содержит `build`. Для сборки из исходников:
-
-```bash
-docker compose -f compose.yaml -f compose.dev.yaml up -d --build app
-```
+For local development, use `compose.dev.yaml` together with the standard Compose file. The production Compose file always pulls the published image and requires no source checkout or local build.

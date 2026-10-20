@@ -1,6 +1,13 @@
 .git
-.venv
 .env
+node_modules
+bin
+coverage.out
+test-results
+playwright-report
 secrets
-__pycache__
-.pytest_cache
+.local-state
+
+.venv/
+__pycache__/
+*.egg-info/
