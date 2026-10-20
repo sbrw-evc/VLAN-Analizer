@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -216,11 +217,31 @@ func (c Connections) Public(origin string) Object {
 	return Object{"gatus": Object{"enabled": c.Gatus.Enabled, "url": c.Gatus.URL, "config_path": c.Gatus.Path, "token_set": c.Gatus.Token != ""}, "kuma": Object{"enabled": c.Kuma.Enabled, "host": c.Kuma.Host, "port": c.Kuma.Port, "database": c.Kuma.Database, "user": c.Kuma.User, "tls": c.Kuma.TLS, "ca": c.Kuma.CA, "instance": c.Kuma.Instance, "password_set": c.Kuma.Password != ""}, "entra": Object{"enabled": c.Entra.Enabled, "tenant": c.Entra.Tenant, "client_id": c.Entra.ClientID, "client_secret_set": c.Entra.Secret != "", "redirect_uri": origin + "/auth/entra/callback"}}
 }
 
+// Revision is encoded as a decimal string because KV services may decode JSON
+// numbers through float64. Legacy numeric revisions remain readable.
+type Revision int64
+
+func (r Revision) MarshalJSON() ([]byte, error) { return json.Marshal(strconv.FormatInt(int64(r), 10)) }
+func (r *Revision) UnmarshalJSON(data []byte) error {
+	value := string(data)
+	if len(data) > 0 && data[0] == '"' {
+		if e := json.Unmarshal(data, &value); e != nil {
+			return e
+		}
+	}
+	parsed, e := strconv.ParseInt(value, 10, 64)
+	if e != nil {
+		return e
+	}
+	*r = Revision(parsed)
+	return nil
+}
+
 type User struct {
-	PasswordHash string `json:"password_hash"`
-	Role         string `json:"role"`
-	Disabled     bool   `json:"disabled"`
-	Version      int64  `json:"version"`
+	PasswordHash string   `json:"password_hash"`
+	Role         string   `json:"role"`
+	Disabled     bool     `json:"disabled"`
+	Version      Revision `json:"version"`
 }
 type Session struct {
 	Sub      string `json:"sub"`

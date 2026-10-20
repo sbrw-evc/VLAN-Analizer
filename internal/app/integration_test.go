@@ -110,13 +110,13 @@ func TestManagedStorageIntegration(t *testing.T) {
 	if e != nil || !found {
 		t.Fatal("application secrets unavailable", e)
 	}
-	// SecretStore retains exact int64 account versions across KV JSON encoding.
-	version := time.Now().UnixNano()
+	// Domain revisions survive the KV service without float64 rounding.
+	version := Revision(time.Now().UnixNano())
 	if e = vault.Write(ctx, "connections/integration-test", Object{"version": version}, nil); e != nil {
 		t.Fatal(e)
 	}
 	var restored struct {
-		Version int64 `json:"version"`
+		Version Revision `json:"version"`
 	}
 	if _, e = vault.Read(ctx, "connections/integration-test", &restored); e != nil || restored.Version != version {
 		t.Fatal("KV round trip", e)

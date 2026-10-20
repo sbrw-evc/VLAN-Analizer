@@ -76,7 +76,7 @@ func newUser(name, password, role string, disabled bool) (User, error) {
 		return User{}, errors.New("invalid username or role")
 	}
 	hash, e := HashPassword(password)
-	return User{hash, role, disabled, time.Now().UnixNano()}, e
+	return User{hash, role, disabled, Revision(time.Now().UnixNano())}, e
 }
 
 type AuthService struct {
