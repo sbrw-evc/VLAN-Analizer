@@ -307,29 +307,43 @@ export function Empty({ icon, title, text, action }: { icon: ReactNode; title: s
   );
 }
 
-/** A drop-down menu of actions next to a button, in a portal so tables do not clip it. */
+/** A drop-down menu of actions next to a button, in a portal so tables do not clip it. It opens upwards when the
+ *  space below the button is short, follows the button while the page scrolls and closes when the button leaves. */
+type MenuPos = { right: number; top?: number; bottom?: number };
+const MENU_ROOM = 220;
+
+function menuPos(r: DOMRect): MenuPos {
+  const right = window.innerWidth - r.right;
+  return window.innerHeight - r.bottom < MENU_ROOM && r.top > MENU_ROOM ? { right, bottom: window.innerHeight - r.top + 6 } : { right, top: r.bottom + 6 };
+}
+
 export function ActionMenu({ label, children }: { label: string; children: (close: () => void) => ReactNode }) {
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const [pos, setPos] = useState<MenuPos | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const open = !!pos;
   useEffect(() => {
-    if (!pos) return;
+    if (!open) return;
     const onDown = (e: PointerEvent) => {
       if (!menu.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node)) setPos(null);
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPos(null);
-    const close = () => setPos(null);
+    const follow = () => {
+      const r = btn.current?.getBoundingClientRect();
+      setPos(!r || r.bottom < 0 || r.top > window.innerHeight ? null : menuPos(r));
+    };
     document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey);
-    window.addEventListener('resize', close);
-    document.addEventListener('scroll', close, true);
+    window.addEventListener('resize', follow);
+    document.addEventListener('scroll', follow, true);
     return () => {
       document.removeEventListener('pointerdown', onDown);
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('resize', close);
-      document.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', follow);
+      document.removeEventListener('scroll', follow, true);
     };
-  }, [pos]);
+  }, [open]);
+  const up = pos?.bottom !== undefined;
   return (
     <>
       <button
@@ -339,12 +353,8 @@ export function ActionMenu({ label, children }: { label: string; children: (clos
         aria-label={label}
         title={label}
         aria-haspopup="menu"
-        aria-expanded={!!pos}
-        onClick={() => {
-          if (pos) return setPos(null);
-          const r = btn.current!.getBoundingClientRect();
-          setPos({ top: r.bottom + 6, right: window.innerWidth - r.right });
-        }}
+        aria-expanded={open}
+        onClick={() => setPos(pos ? null : menuPos(btn.current!.getBoundingClientRect()))}
       >
         <MoreHorizontal size={18} />
       </button>
@@ -355,10 +365,10 @@ export function ActionMenu({ label, children }: { label: string; children: (clos
               ref={menu}
               role="menu"
               className="user-dropdown"
-              style={{ position: 'fixed', top: pos.top, right: pos.right, width: 240, transformOrigin: 'top right' }}
-              initial={{ opacity: 0, y: -6, scale: 0.97 }}
+              style={{ position: 'fixed', top: pos.top ?? 'auto', bottom: pos.bottom ?? 'auto', right: pos.right, width: 240, transformOrigin: up ? 'bottom right' : 'top right' }}
+              initial={{ opacity: 0, y: up ? 6 : -6, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -4, scale: 0.98 }}
+              exit={{ opacity: 0, y: up ? 4 : -4, scale: 0.98 }}
               transition={{ duration: 0.14 }}
             >
               {children(() => setPos(null))}
