@@ -12,4 +12,3 @@ secrets
 __pycache__/
 *.egg-info/
 
-vlan-analizer

@@ -29,7 +29,7 @@ This review describes concrete design decisions, not formal proof of adherence. 
 
 ## Concurrency and lifetime
 
-A bounded worker pool schedules one job per active website/interface pair. The configured limit is 1–32 jobs, default 3. Within each job TCP/TLS, HTTP, browser navigation and traceroute run concurrently after DNS. Go schedules goroutines across available CPUs; there is no Python interpreter or GIL in this path. Browser processes consume substantially more memory than socket probes, so concurrency remains explicitly configurable.
+A bounded worker pool schedules one job per active website/interface pair. The configured limit is 1–32 jobs, default 3. Within each job TCP/TLS, HTTP, browser navigation and traceroute run concurrently after DNS. Each check reuses its DNS answers across these stages; the next check resolves afresh. Go schedules goroutines across available CPUs; there is no Python interpreter or GIL in this path. Browser processes consume substantially more memory than socket probes, so concurrency remains explicitly configurable.
 
 Contexts bound network requests, subprocesses, browser navigation and shutdown. Long-lived monitoring uses the application process context, never the setup HTTP request context. A queued wake-up coalesces repeated scan requests, cycles do not overlap, import reconciliation is serialized, and measurements are written in batches of up to 64. Configuration snapshots are protected by a read/write mutex and replaced as whole values.
 

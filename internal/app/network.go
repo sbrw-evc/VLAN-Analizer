@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -108,6 +109,8 @@ func (LinuxInventory) Discover(ctx context.Context, include []string) (Inventory
 type BoundDialer struct {
 	Interface, Source string
 	Servers           []string
+	mu                sync.RWMutex
+	resolved          map[string][]string
 }
 
 func NewBoundDialer(i Interface, c ScanConfig) *BoundDialer {
@@ -121,7 +124,7 @@ func NewBoundDialer(i Interface, c ScanConfig) *BoundDialer {
 			}
 		}
 	}
-	return &BoundDialer{i.Name, strings.Split(i.Addresses[0], "/")[0], servers}
+	return &BoundDialer{Interface: i.Name, Source: strings.Split(i.Addresses[0], "/")[0], Servers: servers}
 }
 func (d *BoundDialer) control(network, address string, c syscall.RawConn) error {
 	var socketErr error
@@ -149,6 +152,14 @@ func (d *BoundDialer) Resolve(ctx context.Context, host string) ([]string, error
 		}
 		return []string{ip.String()}, nil
 	}
+	// Each dialer belongs to one check. Reuse that check's DNS answer across
+	// concurrent HTTP/TCP/browser stages; the next check resolves afresh.
+	d.mu.RLock()
+	cached := d.resolved[host]
+	d.mu.RUnlock()
+	if len(cached) > 0 {
+		return cached, nil
+	}
 	if len(d.Servers) == 0 {
 		return nil, errors.New("no IPv4 resolver configured")
 	}
@@ -170,6 +181,12 @@ func (d *BoundDialer) Resolve(ctx context.Context, host string) ([]string, error
 			for _, ip := range ips {
 				out = append(out, ip.String())
 			}
+			d.mu.Lock()
+			if d.resolved == nil {
+				d.resolved = map[string][]string{}
+			}
+			d.resolved[host] = out
+			d.mu.Unlock()
 			return out, nil
 		}
 		last = e

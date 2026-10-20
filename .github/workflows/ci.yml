@@ -27,7 +27,7 @@ jobs:
           node --check web/static/app.js
           node --check web/static/setup.js
       - run: go test -race ./...
-      - run: go build ./cmd/vlan-analizer
+      - run: go build -o /tmp/vlan-analizer-ci ./cmd/vlan-analizer
       - name: Start disposable Kuma-compatible database
         run: |
           docker run -d --name test-kuma-db -p 127.0.0.1:3307:3306 -e MARIADB_ROOT_PASSWORD=integration-root-password -e MARIADB_DATABASE=kuma mariadb:11.4

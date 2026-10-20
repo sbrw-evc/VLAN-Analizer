@@ -57,6 +57,7 @@ func randomKey(n int) string {
 func timestamp() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 var namePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
+var interfacePattern = regexp.MustCompile(`^[a-zA-Z0-9_.:@-]+$`)
 var guidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$`)
 
 func validateURL(raw string) error {
@@ -67,8 +68,7 @@ func validateURL(raw string) error {
 	if strings.Contains(u.Hostname(), ":") {
 		return errors.New("IPv6 probes are not yet supported")
 	}
-	switch u.Port() {
-	case "", "80", "443", "8080", "8443":
+	if u.Port() == "" || validPort(u.Port()) {
 		return nil
 	}
 	return errors.New("allowed web ports: 80, 443, 8080, 8443")
@@ -142,7 +142,7 @@ func (c ScanConfig) Validate() error {
 		return errors.New("invalid scan limits")
 	}
 	for _, n := range c.Interfaces {
-		if len(n) > 15 || !regexp.MustCompile(`^[a-zA-Z0-9_.:@-]+$`).MatchString(n) {
+		if len(n) > 15 || !interfacePattern.MatchString(n) {
 			return errors.New("invalid interface name")
 		}
 	}
