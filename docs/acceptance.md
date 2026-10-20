@@ -1,18 +1,21 @@
-# Linux host acceptance checklist
+# Acceptance and diagnostics
 
-This checklist distinguishes unit tests from evidence that traffic really travels through each VLAN. It requires your configured Linux test host and authorized destinations.
+## Automated checks
 
-1. Confirm host inventory with `ip -d address show`, `ip route show table all`, `ip rule show`, `bridge vlan show`. Match VLAN IDs, addresses, MAC/MTU and parent/master with the Networks page. An untagged NIC must show an unknown VLAN ID.
-2. Restrict `INTERFACES` to intended L3 interfaces. Confirm that bridge slaves and addressless interfaces do not produce availability cells.
-3. Verify a working gateway and source-policy route for **each** selected interface. If multiple default routes exist, test policy routing before accepting any result. The application never changes this state.
-4. Capture traffic on one interface at a time, e.g. `sudo tcpdump -ni eno1.20 'port 53 or port 80 or port 443'`. Run a controlled site check. Confirm DNS, the HTML request, redirects and subordinate resource requests use the selected interface/source. Compare with the other VLAN. Do not rely solely on the dashboard to prove isolation.
-5. For two test VLANs, permit a controlled site from one and block it from the other at the appropriate upstream firewall. Expect healthy/down accordingly. Repeat with DNS blocked and with a subresource blocked. A main page 200 plus a resource 404/timeout should be degraded.
-6. Use a known valid HTTPS site, an expired leaf and a hostname-mismatched certificate. Expect TLS metadata for valid certificates and `valid=false` for invalid ones; no invalid site should be healthy. Check internal CA trust separately in Python, curl and Chromium.
-7. Change a manual URL, pause it, resume it and delete it. Imported Gatus entries should retain pauses, deduplicate by URL and retire after removal from a fully readable source. Hidden API URLs must produce a warning; YAML import should recover them.
-8. Restart the app. Sites and historical results must persist in ClickHouse. Interrupt a scan and wait beyond `STALE_AFTER`: old green measurements must become unknown. Restart ClickHouse/OpenBao and confirm failures appear without exposing secrets. OpenBao must be unsealed after its restart.
-9. Confirm unauthenticated requests cannot read inventory/results. Test local viewer/admin. Change a local password and disable an account to confirm sessions are revoked. Test Entra roles and an unassigned tenant account. Test logout and CSRF rejection for another Origin.
-10. Read both Zabbix endpoints with a valid integration token, then without/with an invalid token. Confirm unknown availability is -1, missing timings are null, and paused/deleted sites are excluded from LLD. Check Zabbix `nodata` alerts when the application is stopped.
-11. Inspect 24-hour history and compare HTTP total, independent TCP/TLS and browser timings. They measure different requests and include different overhead; exact equality is not expected.
-12. Observe RAM/CPU and scan duration for the expected site × interface count. Set concurrency and freshness accordingly. Confirm the host stays usable under repeated Chromium timeouts.
+CI runs `go vet ./...`, formatting checks, JavaScript syntax checks and `go test -race ./...`. Unit and socket tests cover bounded scheduling, configuration snapshots, freshness, credentials, authorization, source imports, invalid-interface failures, HTTP/CONNECT proxying and tunnel shutdown.
 
-Current scope limits: IPv4 probes; leaf certificate metadata rather than complete certificate-chain analysis; initial browser load rather than authenticated user journeys; a single Linux host and application worker; single-node OpenBao/ClickHouse in the supplied Compose.
+Linux integration checks use a real production image with Chromium and a disposable MariaDB instance. The import user has only column-level SELECT privileges, and the test verifies that writes fail.
+
+The fresh-install check copies only `compose.yaml` into a clean directory, overrides the image with the just-built CI image and starts it without `.env` or host preparation files. Playwright completes the actual browser wizard using managed services, signs in, changes monitoring settings, configures Gatus/Kuma, imports sites, adds a manual site and verifies inventory. Restart checks exercise persistent credentials/settings, a closed setup wizard and automatic OpenBao unsealing.
+
+## Host acceptance
+
+On the target Linux host, compare the Networks page with the host's configured VLAN interfaces and routes. Add a controlled website reachable from one selected VLAN and blocked from another. Confirm matrix differences and inspect DNS, TCP, TLS, HTTP, browser resource failures and traceroute details. Interface isolation depends on the host's routing/firewall configuration, which cannot be reproduced by a generic GitHub runner.
+
+Disable an imported monitor in Kuma and synchronize to confirm source pause handling. Temporarily block the ClickHouse connection and confirm monitoring errors are visible. Let a measurement exceed the configured freshness threshold and confirm it becomes unknown instead of staying green.
+
+## Optional diagnostics
+
+Installation does not require diagnostic commands. If a service cannot start, `docker compose ps` and `docker compose logs --tail=100` provide lifecycle information. `/healthz` reports that HTTP is running; `/readyz` requires completed setup, reachable ClickHouse and a successful monitoring cycle. Before the wizard completes, the application container can report unhealthy while the setup page remains available.
+
+Loopback ports `18123` and `18200` and application port `8000` must be free. Preserve named volumes when restarting. If OpenBao cannot unseal, verify that the original bootstrap and OpenBao volumes belong to the same deployment. Do not delete one volume as a troubleshooting shortcut.

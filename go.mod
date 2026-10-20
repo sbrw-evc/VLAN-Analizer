@@ -1,0 +1,25 @@
+module github.com/sbrw-evc/VLAN-Analizer
+
+go 1.25.0
+
+require (
+	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
+	github.com/chromedp/chromedp v0.14.2
+	github.com/coreos/go-oidc/v3 v3.15.0
+	github.com/go-sql-driver/mysql v1.9.3
+	github.com/golang-jwt/jwt/v5 v5.3.0
+	golang.org/x/crypto v0.43.0
+	golang.org/x/oauth2 v0.32.0
+	golang.org/x/sys v0.37.0
+	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/chromedp/sysutil v1.1.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
+	github.com/go-json-experiment/json v0.0.0-20250725192818-e39067aee2d2 // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gobwas/ws v1.4.0 // indirect
+)

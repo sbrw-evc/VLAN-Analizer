@@ -1,12 +1,17 @@
-FROM python:3.12-slim-bookworm
+FROM golang:1.25-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY VERSION ./
+COPY cmd ./cmd
+COPY internal ./internal
+COPY web ./web
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/sbrw-evc/VLAN-Analizer/internal/app.Version=$(cat VERSION)" -o /vlan-analizer ./cmd/vlan-analizer
+
+FROM debian:bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/sbrw-evc/VLAN-Analizer"
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
-WORKDIR /opt/vlan-analizer
-RUN apt-get update && apt-get install -y --no-install-recommends iproute2 curl traceroute ca-certificates tini && rm -rf /var/lib/apt/lists/*
-COPY requirements.lock pyproject.toml ./
-RUN pip install --no-cache-dir -r requirements.lock && playwright install --with-deps chromium && rm -rf /var/lib/apt/lists/*
-COPY app ./app
-COPY deploy ./deploy
-RUN pip install --no-deps .
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--workers", "1", "--no-proxy-headers", "--no-access-log"]
+RUN apt-get update && apt-get install -y --no-install-recommends chromium iproute2 traceroute ca-certificates tini && rm -rf /var/lib/apt/lists/*
+COPY --from=build /vlan-analizer /usr/local/bin/vlan-analizer
+ENV APP_DATA_DIR=/var/lib/vlan-analizer
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/vlan-analizer"]
+CMD ["serve"]

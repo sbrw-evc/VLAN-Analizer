@@ -1,64 +1,33 @@
-# Мастер первого запуска и настройки подключений
+# First-run setup
 
-## Новый запуск
+Download the release `compose.yaml`, run `docker compose up -d`, and open `http://<linux-host>:8000`. No `.env` or preparation commands are required. Complete setup on a trusted network because the first completed wizard creates the initial administrator.
 
-Production Compose скачивает `ghcr.io/sbrw-evc/vlan-analizer:<version>`. Для внешних OpenBao/ClickHouse достаточно запустить только `app`: приложение стартует без подключений и открывает мастер.
+## Wizard
 
-```bash
-cp .env.example .env
-# Укажите интерфейсы/резолверы хоста и желаемую версию образа.
-docker compose pull app
-docker compose up -d app
-docker compose exec app cat /var/lib/vlan-analizer/setup-token
-```
+1. **Application URL:** enter the exact browser origin, including port when applicable. This controls same-origin write checks, secure cookies and Entra redirect URLs.
+2. **OpenBao:** keep the automatically managed service, or supply an external URL and either an operator token or an existing AppRole. Operator tokens only provision a scoped AppRole and are not persisted by the application. The selected mount must be KV v2.
+3. **ClickHouse:** keep the automatically generated bundled connection, or enter an external HTTP(S) endpoint, database, user and password. The database must exist; the user must be able to create/alter and read/write application tables.
+4. **Administrator:** create a local account with a password of at least 12 bytes. The application stores an Argon2id hash in OpenBao.
+5. **Entra ID (optional):** supply tenant ID, application ID and client secret, or skip this step. Add the displayed web redirect URI to the Entra application and assign `VLAN.Admin` or `VLAN.Viewer` application roles. Discovery testing does not verify client credentials or role assignment; those are checked during sign-in.
 
-Откройте приложение через ваш HTTPS reverse proxy. По умолчанию сервер слушает loopback `127.0.0.1:8000`. Для проверки на самом хосте можно открыть `http://localhost:8000` и указать этот же origin в мастере. Задайте корректный внешний URL до подключения Entra.
+Setup verifies the storage connections and writes installation metadata atomically. Once complete, the setup endpoints refuse further configuration. A failed partial installation can be retried using the same service settings and administrator credentials; existing secrets and accounts are not overwritten by a different installation.
 
-Ключ `setup-token` подтверждает доступ к серверу; без него нельзя тестировать или сохранять подключения. Он не возвращается API, не записывается в логи, URL или localStorage и удаляется после завершения установки. После настройки падение OpenBao/ClickHouse не открывает мастер повторно: приложение ждёт восстановления зависимостей и повторяет подключение каждые 30 секунд.
+## Settings after installation
 
-## Пять шагов
+Sign in and open **Administration**. Monitoring settings include interface selection, IPv4 DNS overrides, interval, concurrent site/interface checks, timeout, stale threshold and browser probing. Leave interfaces unselected to use eligible interfaces automatically. Each DNS line uses `interface=192.0.2.53,192.0.2.54` syntax. DNS requests bind to that interface too; a loopback system resolver may be unreachable through a VLAN, in which case enter a reachable resolver.
 
-1. **Access:** ключ настройки и точный origin приложения.
-2. **OpenBao:** URL и KV v2 mount. Сервер должен быть инициализирован и разблокирован. Можно ввести provisioning token: мастер создаст KV v2 mount (если отсутствует), AppRole auth method (если отсутствует), отдельную policy и scoped AppRole. Provisioning token используется только во время запроса и не сохраняется. После настройки отзовите временный токен по вашей политике. Альтернатива — готовые RoleID/SecretID с policy из `deploy/bao-policy.hcl` (подставьте ваш mount).
-3. **ClickHouse:** HTTP(S) URL, существующая БД, пользователь и пароль. Соединение проверяется до сохранения; при завершении создаются/обновляются таблицы приложения, поэтому пользователь должен иметь соответствующие DDL-права. База данных автоматически не создаётся.
-4. **Administrator:** локальные имя и пароль администратора приложения, не пользователя ClickHouse/OpenBao. Минимум 12 символов; хранится только Argon2id-хеш в OpenBao.
-5. **Entra ID (необязательно):** Tenant ID, Client ID, Client Secret. При включении проверяется tenant discovery; реальная проверка client secret и назначения app roles возможна при входе. Redirect URI отображается в мастере. Нужны single-tenant Web App Registration и роли `VLAN.Admin`/`VLAN.Viewer`.
+Connection forms configure Gatus, Kuma MySQL/MariaDB and Entra ID. Test and save are separate actions. Empty password/token/secret fields preserve saved values, and read responses expose only credential-presence flags. These settings are stored in OpenBao. The initial OpenBao/ClickHouse endpoints are installation settings; changing the storage topology of an existing installation requires a planned data migration.
 
-Финальный запрос повторно проверяет зависимости. В KV используются compare-and-set при первичном создании app-секрета/администратора. Если выбранный путь OpenBao содержит другую установку, её секреты не заменяются. После частичного сбоя можно повторить мастер с прежними адресами, учётными данными и именем администратора: журнал `pending.json` позволяет завершить начатую установку. После полного сохранения мастер закрыт.
+## Bundled service lifecycle
 
-## Локальные bundled-сервисы
+Compose starts a Go initialization job, persistent ClickHouse and OpenBao, a Go bootstrap helper and the application. Random credentials are generated once. The helper initializes OpenBao, stores recovery material in the bootstrap volume, creates a restricted AppRole, revokes its initial root token, and automatically unseals OpenBao after a restart. The application independently retries dependency activation during startup.
 
-Если внешних серверов нет, профиль `bundled` запускает ClickHouse и OpenBao:
+Protect the host and named volumes. The managed bootstrap volume contains unseal material and AppRole credentials, so it belongs in the same access-control and backup boundary as OpenBao. This is an unattended local deployment model, not external KMS auto-unseal. For independent key management, select external OpenBao in the wizard.
 
-```bash
-python3 deploy/prepare.py
-docker compose --profile bundled up -d clickhouse openbao
-docker compose exec openbao bao operator init
-docker compose exec openbao bao operator unseal
-```
+The application volume contains a restricted installation file and AppRole bootstrap credentials; ClickHouse passwords, user hashes, signing keys and integration credentials live in OpenBao. Back up the application, bootstrap, ClickHouse users/data and OpenBao volumes as a consistent deployment. Deleting only one storage volume can make the remaining installation unusable.
 
-Сохраните unseal-ключи и root token в защищённом хранилище. Повторите `unseal` нужным числом различных ключей. Затем запустите `app` и настройте его через браузер. Для bundled-сервисов URL — `http://127.0.0.1:8200` и `http://127.0.0.1:8123`; пользователь ClickHouse `vlan`, база `default`. Пароль создан в `secrets/clickhouse_password`. Эти службы доступны только через loopback хоста; TLS-проверки внешних соединений по умолчанию не отключаются.
+## External AppRole policy
 
-Приложение не создаёт серверную БД, не хранит unseal-ключи и не выполняет автоматический unseal. OpenBao после перезапуска необходимо разблокировать либо заранее настроить KMS auto-unseal. Профиль необязателен и не навязывает локальные зависимости при использовании внешних серверов.
+`deploy/bao-policy.hcl` contains the minimum KV paths for an existing AppRole using the default `secret` mount. The application needs create/read on `vlan-analizer/app` and create/read/update on `users/*` and `connections/*`. Use an AppRole with persistent SecretID and renewable or reissuable tokens. External OpenBao must be initialized and unsealed by its operator; no CLI actions are necessary for the bundled installation.
 
-## Где хранятся настройки
-
-- Persistent volume `app_data`: не секретные адреса/параметры первоначальных подключений в `installation.json`; bootstrap RoleID/SecretID в `approle.json`. Файлы записываются атомарно с правами `0600`; provisioning token и пароли туда не попадают.
-- OpenBao `secret/vlan-analizer/app`: session key, Zabbix token и пароль ClickHouse.
-- OpenBao `secret/vlan-analizer/users/<username>`: роли, Argon2id-хеши и версии локальных пользователей.
-- OpenBao `secret/vlan-analizer/connections/{gatus,kuma,entra}`: конфигурация интеграций и их credentials. HTTP API чтения возвращает только параметры и признаки наличия секретов, без самих токенов/паролей.
-- ClickHouse: сайты, снимки интерфейсов и временные ряды проверок.
-
-Сохраните `app_data`, OpenBao и ClickHouse вместе с recovery-материалами. Не запускайте несколько app-реплик/worker с одним volume; поддерживается один worker. Удаление `app_data` — не способ сброса пароля: чужая/старая установка в OpenBao не будет перезаписана новым мастером.
-
-## Настройки после входа
-
-В разделе **Administration** администратору доступны формы Gatus, Kuma MySQL/MariaDB и Entra ID. Можно включать/выключать источник, проверять соединение и сохранять параметры. Настройки применяются сразу; restart контейнера не нужен. Пустое поле секрета сохраняет ранее заданное значение. Проверка соединения не изменяет сохранённые настройки; сохранение не требует успешного теста, чтобы можно было подготовить подключение до запуска внешней службы. Состояние сбоя видно при синхронизации.
-
-Gatus поддерживает URL API с необязательным Bearer или путь к mounted YAML. Kuma поддерживает host/port/database/user/password, TLS, CA и стабильный instance ID. Пути YAML/CA должны существовать внутри контейнера; файлы подключаются read-only через Compose. Отключение источника сохраняет его прежние сайты: для паузы проверок остановите соответствующие записи отдельно. Entra можно добавить позже; локальный администратор остаётся доступен.
-
-## Обновление установки старого формата
-
-Старые переменные окружения остаются fallback для совместимости. Если выставлены `BAO_ROLE_ID_FILE` и `BAO_SECRET_ID_FILE`, мастер не открывается и используется прежний app-секрет/администратор. При переходе на новый Compose добавьте эти переменные и прежние read-only mounts RoleID/SecretID в свой override, а также прежние URL/пользователя ClickHouse, URL/mount OpenBao и `PUBLIC_URL`. При необходимости используйте `--profile bundled`, чтобы сохранить локальные службы и их volumes.
-
-Добавьте в существующую AppRole policy права `create/read/update` на `secret/data/vlan-analizer/connections/*`. Без них старый мониторинг продолжит использовать окружение, а изменение подключений через UI будет отклонено. Первый Save создаёт конфигурацию источника в OpenBao, после чего она имеет приоритет над его переменными окружения. Не запускайте устаревший `deploy/bootstrap.py` для новой установки: администратора теперь создаёт мастер.
+Sessions use HttpOnly, SameSite cookies and a signing key stored in OpenBao. HTTPS origins enable Secure cookies. Local password/role updates revoke that account's existing sessions. Disabling Entra sign-in rejects existing Entra sessions; Entra role changes take effect on the next sign-in or session expiry.

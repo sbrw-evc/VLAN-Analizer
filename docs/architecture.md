@@ -1,0 +1,38 @@
+# Architecture and design review
+
+The v0.3 backend replaces the Python application, preparation scripts, browser driver and probes with Go. HTML/CSS/JavaScript remain browser assets, and Node/Playwright are used only for UI testing. Chromium remains a separate browser process.
+
+## Boundaries
+
+| Responsibility | Implementation | Boundary |
+| --- | --- | --- |
+| HTTP, authorization and DTO validation | `http.go`, `auth.go` | `http.Handler`, `SecretStore` |
+| Installation and service lifecycle | `application.go`, `bundled.go`, `files.go` | Atomic installation journal, dependency activation |
+| Sites, inventory and measurements | `storage.go` | `Repository` |
+| Linux inventory and bound sockets | `network.go` | `InventoryReader` |
+| Network diagnostics and browser | `probes.go`, `proxy.go` | `Prober`, `Browser` |
+| External website sources | `importers.go` | `Importer` |
+| Scheduling and dashboard snapshots | `worker.go` | Injected repository, inventory and probe interfaces |
+
+Go expresses object-oriented design through structs, methods and composition. Components depend on small interfaces at their consumption boundaries; inheritance and a class hierarchy are unnecessary. Interface adapters can be replaced by test doubles without emulating HTTP or SQL internals.
+
+## SOLID and DRY review
+
+- **Single responsibility:** HTTP handlers coordinate validation, authorization and service calls. SQL, KV, import parsing, browser automation and Linux socket behavior are separate adapters.
+- **Open/closed:** another importer or probe adapter can implement an existing interface. Registering a new integration still requires explicit UI/API wiring; this is intentional rather than a claim of zero-change extensibility.
+- **Liskov substitution:** adapters obey context cancellation and return errors rather than silently changing interfaces/routes. Tests substitute in-memory storage and deterministic probes using the same contracts.
+- **Interface segregation:** browser, inventory, imports and secrets each expose only their respective operations. The repository groups the application's cohesive persistence operations.
+- **Dependency inversion:** scheduling and authentication operate against interfaces. Installation is the composition boundary that constructs concrete HTTP/ClickHouse/OpenBao adapters.
+- **DRY:** shared URL validation, bound dialing, JSON requests, atomic persistence, session parsing and source reconciliation avoid duplicate policy logic. Domain-specific error handling remains explicit.
+
+This review describes concrete design decisions, not formal proof of adherence. The HTTP router and composition root still know the supported integrations; adding many new integrations would justify a registry rather than expanding their switches.
+
+## Concurrency and lifetime
+
+A bounded worker pool schedules one job per active website/interface pair. The configured limit is 1–32 jobs, default 3. Within each job TCP/TLS, HTTP, browser navigation and traceroute run concurrently after DNS. Go schedules goroutines across available CPUs; there is no Python interpreter or GIL in this path. Browser processes consume substantially more memory than socket probes, so concurrency remains explicitly configurable.
+
+Contexts bound network requests, subprocesses, browser navigation and shutdown. Long-lived monitoring uses the application process context, never the setup HTTP request context. A queued wake-up coalesces repeated scan requests, cycles do not overlap, import reconciliation is serialized, and measurements are written in batches of up to 64. Configuration snapshots are protected by a read/write mutex and replaced as whole values.
+
+The OpenBao token cache and OIDC provider cache have separate locks. Argon2 login work has a fixed capacity and login attempts are rate limited. CONNECT tunnels are tracked and closed when their per-check proxy shuts down. DNS and all outgoing probe sockets use the selected source/interface; an interface error is propagated rather than retried through the default route.
+
+Concurrent code is checked with `go test -race`. Integration CI exercises real Chromium, MariaDB column-level SELECT access, bundled storage, browser setup and automatic unsealing after restart. No numeric performance gain is claimed without a representative deployment benchmark.

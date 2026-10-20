@@ -1,59 +1,19 @@
-# Импорт сайтов из Uptime Kuma MySQL/MariaDB
+# Uptime Kuma database import
 
-Импорт читает таблицу `monitor` Uptime Kuma 2.x. Подключение совместимо с MySQL/MariaDB; приложению нужен только `SELECT` на шесть полей. Сам Uptime Kuma рекомендует MariaDB для внешней БД; выбор и поддержку сервера БД определяет ваша установка Kuma. SQLite и внутренние файловые БД этот импорт не читает.
+Configure **Administration → Uptime Kuma · MySQL / MariaDB** after installation. Enter host, port, database, username, password and a stable instance ID. Connections are tested before saving only when you choose **Test connection**. Saved changes apply immediately; use **Sync Kuma** to import on demand. Enabled sources also synchronize approximately every five minutes between monitoring cycles.
 
-Импортируется **список сайтов**, а не история `heartbeat`, готовые статусы или секреты HTTP-мониторов. Проверки доступности выполняются заново из интерфейсов VLAN Analizer. Поддерживаются типы `http`, `keyword`, `json-query`, `real-browser` с разрешённым HTTP/HTTPS URL. Kuma-specific keyword/JSON assertions, методы POST, заголовки авторизации, тела запросов, cookies и сценарии браузера не переносятся. Портовые, ping, DNS и другие не-веб-мониторы пропускаются.
-
-## 1. Создать пользователя с ограниченными правами
-
-Выполните от имени администратора MySQL/MariaDB, подставив имя базы, пароль и адрес машины VLAN Analizer. Пользователь должен подключаться из хостовой сети приложения, а не из его Docker bridge.
+The importer reads only `id`, `name`, `url`, `type`, `active` and `parent` from the `monitor` table, in a read-only transaction. It does not read notification credentials or change the source database. Use a dedicated account with only these privileges:
 
 ```sql
-CREATE USER 'vlan_reader'@'192.168.0.50' IDENTIFIED BY '<strong-password>' REQUIRE SSL;
+CREATE USER 'vlan_reader'@'monitor-host' IDENTIFIED BY 'replace-with-a-strong-password';
 GRANT SELECT (id, name, url, type, active, parent)
-ON `kuma`.`monitor` TO 'vlan_reader'@'192.168.0.50';
+ON kuma.monitor TO 'vlan_reader'@'monitor-host';
 ```
 
-Импорт использует ограниченный запрос:
+This SQL is for the operator of an existing Kuma database; it is not an installation step for VLAN Analizer. Kuma must use a compatible MySQL/MariaDB schema. SQLite is not supported by this integration.
 
-```sql
-SELECT id, name, url, type, active, parent
-FROM monitor ORDER BY id LIMIT 1001;
-```
+Enable TLS to require certificate and hostname validation. An optional CA path refers to a file mounted inside the container. Without a custom CA the system trust store is used. Never use TLS-disabled connections across an untrusted network. The password is stored in OpenBao and never returned by the settings API; leaving its field blank preserves it.
 
-Он выполняется в `START TRANSACTION READ ONLY`, после чего транзакция откатывается и соединение закрывается. Таблицы Kuma не создаются и не изменяются. Имена таблицы и столбцов фиксированы; SQL не берётся из пользовательского ввода. Если версия Kuma изменила эту схему, импорт завершится ошибкой, сохранив уже импортированные сайты.
+Supported HTTP-oriented monitor types are `http`, `keyword`, `json-query` and `real-browser`. The application imports their destination URLs and performs its own checks; Kuma-specific assertions, request bodies, authentication and notification settings are not copied. Paused monitors or monitors beneath paused groups remain disabled at the source. A local enable switch cannot override a source pause.
 
-## 2. Настроить подключение в приложении
-
-После первого входа откройте **Administration → Uptime Kuma · MySQL / MariaDB**. Включите импорт и укажите host, port, database, username/password, TLS и стабильный instance ID. Секрет сохраняется в OpenBao и никогда не возвращается при чтении настроек; пустой пароль сохраняет прежнее значение. Параметры подключения больше не требуется записывать в `.env`.
-
-Для частной CA укажите путь внутри контейнера, например `/config/kuma-db-ca.pem`, и добавьте read-only volume:
-
-```yaml
-- /opt/certs/kuma-db-ca.pem:/config/kuma-db-ca.pem:ro
-```
-
-TLS по умолчанию обязателен: проверяются CA и hostname, незашифрованного fallback нет. Отключайте TLS только в осознанно выбранной изолированной тестовой среде. `instance ID` задайте до первого импорта и сохраняйте при переносе той же БД.
-
-Нажмите **Test connection** для проверки без сохранения; **Save Kuma** сохраняет параметры и применяет их сразу. Тест читает список сайтов, но не импортирует его. Подробности настройки первого запуска и хранения конфигурации: [setup.md](setup.md).
-
-## 4. Выполнить импорт
-
-Нажмите **Sync Kuma** под администратором на главной странице. Соответствующий endpoint — `POST /api/kuma/sync`, с обычной сессией администратора и `Origin`, равным `PUBLIC_URL`. Отдельный Zabbix-токен не даёт права импорта.
-
-При включённом источнике Kuma в настройках синхронизация также автоматически выполняется в начале цикла проверок, не чаще чем раз в пять минут после успешного импорта. Ошибка подключения, несовместимая схема или неверный пароль отображаются без выдачи credentials клиенту. Ранее импортированные сайты при ошибке не удаляются. Для подключения к БД используется обычный маршрут хоста; проверки **самих сайтов** по-прежнему выполняются из каждого выбранного VLAN.
-
-## Правила синхронизации
-
-- ID сайта зависит от `KUMA_INSTANCE_ID` и `monitor.id`: изменение имени/URL обновляет запись, сохраняя историю. Два разных монитора с одинаковым URL остаются отдельными записями. Ручной/Gatus-сайт с таким же URL не объединяется с Kuma автоматически.
-- Учитывается `active` монитора и всех его родителей. Если монитор или группа приостановлены в Kuma, строка остаётся в списке, но проверки не запускаются и строка не попадает в Zabbix discovery.
-- `enabled` хранит локальную паузу, `source_enabled` — состояние в Kuma. Пауза пользователя сохраняется при импорте. Возобновление в Kuma запускает проверки только при отсутствии локальной паузы.
-- Имя из источника обновляется при синхронизации. URL импортированной записи меняется в Kuma; удалить её следует там же. Локально доступна пауза.
-- Удалённые/сменившие тип на не-веб мониторы исключаются из активного списка после полного импорта без предупреждений. История в ClickHouse сохраняется по обычному TTL.
-- Невалидный URL или некорректная иерархия дают предупреждение с ID монитора. При таких предупреждениях автоматическое удаление пропущенных записей не выполняется, чтобы неполная выборка не удаляла существующий инвентарь.
-- Ограничение — 1000 строк `monitor`, включая группы и не-веб-мониторы. 1001-я строка вызывает отказ **до записи изменений**; лимит не приводит к частичному удалению.
-- `source_enabled` добавляется в ClickHouse идемпотентно при старте. Для старых сайтов по умолчанию используется `1`; старые настройки продолжают работать.
-
-Проверьте на своей базе: активный сайт, приостановленный сайт, приостановленную группу, смену URL, локальную паузу, удаление монитора и отказ доступа к БД. В CI есть отдельная проверка на disposable MariaDB с пользователем, имеющим только `SELECT` на нужные поля.
-
-Исходный контракт сверялся с [моделью monitor Uptime Kuma 2.0.2](https://github.com/louislam/uptime-kuma/blob/2.0.2/server/model/monitor.js). Внутренняя схема Kuma не является публичным стабильным API: после её обновления проверьте импорт на тестовой установке.
+Stable IDs combine the instance ID and Kuma monitor ID. Keep the instance ID unchanged for the same database. Repeated syncs preserve local enable switches. Deleted monitors are retired only after a complete import without parsing warnings; a failed import leaves existing sites intact. Invalid URLs and parent cycles are skipped with warnings. Imports are limited to 1,000 source monitors. Website URLs support HTTP(S) on ports 80, 443, 8080 and 8443.

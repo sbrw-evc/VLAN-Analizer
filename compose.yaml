@@ -1,68 +1,110 @@
+# Download this file and run: docker compose up -d
+# Open http://localhost:8000 or http://<linux-host>:8000 to complete setup.
+# .env is optional; only an image-version override is supported.
+x-app-image: &app-image ghcr.io/sbrw-evc/vlan-analizer:${VLAN_ANALIZER_VERSION:-latest}
 services:
+  prepare:
+    image: *app-image
+    command: [prepare]
+    restart: on-failure
+    environment:
+      BUNDLE_DIR: /bootstrap
+      CH_USERS_DIR: /ch-users
+    volumes:
+      - bootstrap_data:/bootstrap
+      - clickhouse_users:/ch-users
+    network_mode: none
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    ports: ["127.0.0.1:18123:8123"]
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_users:/etc/clickhouse-server/users.d:ro
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    healthcheck:
+      test: [CMD, wget, --spider, -q, http://localhost:8123/ping]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [management]
+  openbao:
+    image: openbao/openbao:2.4.4
+    command: [server]
+    restart: unless-stopped
+    environment:
+      BAO_LOCAL_CONFIG: '{"ui":false,"disable_mlock":true,"storage":{"file":{"path":"/openbao/file"}},"listener":{"tcp":{"address":"0.0.0.0:8200","tls_disable":true}},"api_addr":"http://127.0.0.1:8200"}'
+    ports: ["127.0.0.1:18200:8200"]
+    volumes:
+      - bao_data:/openbao/file
+    networks: [management]
+  bootstrap:
+    image: *app-image
+    command: [bootstrap]
+    restart: unless-stopped
+    environment:
+      BUNDLE_DIR: /bootstrap
+      BUNDLE_BAO_URL: http://openbao:8200
+      BUNDLE_APP_BAO_URL: http://127.0.0.1:18200
+      BUNDLE_CH_URL: http://127.0.0.1:18123
+    volumes:
+      - bootstrap_data:/bootstrap
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+      openbao:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, vlan-analizer, bundle-health]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [management]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
   app:
-    image: ghcr.io/sbrw-evc/vlan-analizer:${VLAN_ANALIZER_VERSION:-latest}
+    image: *app-image
     network_mode: host
     restart: unless-stopped
-    init: true
-    env_file: .env
     environment:
       APP_DATA_DIR: /var/lib/vlan-analizer
+      MANAGED_CONFIG: /bootstrap/managed.json
     volumes:
       - app_data:/var/lib/vlan-analizer
+      - bootstrap_data:/bootstrap:ro
       - /etc/resolv.conf:/etc/resolv.conf:ro
-      # Optional read-only Gatus YAML / private CA mounts go here.
+    depends_on:
+      bootstrap:
+        condition: service_healthy
     cap_drop: [ALL]
     cap_add: [NET_RAW]
     security_opt: [no-new-privileges:true]
     read_only: true
-    tmpfs:
-      - /tmp:size=1G,mode=1777
+    tmpfs: [/tmp:size=1G,mode=1777]
     shm_size: 256mb
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=5)"]
+      test: [CMD, vlan-analizer, health]
       interval: 30s
-      timeout: 10s
+      timeout: 6s
       start_period: 60s
-  clickhouse:
-    profiles: [bundled]
-    image: clickhouse/clickhouse-server:25.8
-    restart: unless-stopped
-    ports: ["127.0.0.1:8123:8123"]
-    environment:
-      CLICKHOUSE_USER: vlan
-      CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
-      CLICKHOUSE_DB: default
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
-    secrets: [clickhouse_password]
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-      - clickhouse_logs:/var/log/clickhouse-server
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    healthcheck:
-      test: [CMD, wget, --spider, -q, http://localhost:8123/ping]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-  openbao:
-    profiles: [bundled]
-    image: openbao/openbao:2.4.4
-    command: [server, -config=/openbao/config/bao.hcl]
-    restart: unless-stopped
-    ports: ["127.0.0.1:8200:8200"]
-    environment:
-      BAO_ADDR: http://127.0.0.1:8200
-    cap_add: [IPC_LOCK]
-    volumes:
-      - ./deploy/bao.hcl:/openbao/config/bao.hcl:ro
-      - bao_data:/openbao/file
 volumes:
   app_data:
+  bootstrap_data:
+  clickhouse_users:
   clickhouse_data:
-  clickhouse_logs:
   bao_data:
-secrets:
-  clickhouse_password:
-    file: ./secrets/clickhouse_password
+networks:
+  management:
+    internal: true
