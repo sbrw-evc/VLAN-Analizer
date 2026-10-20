@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sbrw-evc/VLAN-Analizer/internal/hostnet"
 )
 
 // App orchestrates dependencies; HTTP, SQL, network and secrets remain replaceable adapters.
@@ -18,6 +20,7 @@ type App struct {
 	rootCancel             context.CancelFunc
 	mu                     sync.RWMutex
 	installMu, importMu    sync.Mutex
+	scanMu                 sync.Mutex
 	dir, managedPath       string
 	config                 *InstallConfig
 	repo                   Repository
@@ -33,6 +36,7 @@ type App struct {
 	wake                   chan struct{}
 	inventoryReader        InventoryReader
 	prober                 Prober
+	hostNetwork            HostNetwork
 	wg                     sync.WaitGroup
 }
 
@@ -41,7 +45,7 @@ func New(dir, managedPath string) (*App, error) {
 		return nil, e
 	}
 	root, rootCancel := context.WithCancel(context.Background())
-	a := &App{root: root, rootCancel: rootCancel, dir: dir, managedPath: managedPath, connections: DefaultConnections(), scan: DefaultScan(), inventory: Inventory{Interfaces: []Interface{}, Bridge: []Object{}}, warnings: map[string][]string{"gatus": {}, "kuma": {}}, wake: make(chan struct{}, 1), inventoryReader: LinuxInventory{}, prober: NetworkProber{Browser: Chromium{}}}
+	a := &App{root: root, rootCancel: rootCancel, dir: dir, managedPath: managedPath, connections: DefaultConnections(), scan: DefaultScan(), inventory: Inventory{Interfaces: []Interface{}, Bridge: []Object{}}, warnings: map[string][]string{"gatus": {}, "kuma": {}}, wake: make(chan struct{}, 1), inventoryReader: LinuxInventory{}, prober: NetworkProber{Browser: Chromium{}}, hostNetwork: hostnet.NewClient(hostnet.DefaultSocket)}
 	var config InstallConfig
 	e := readJSON(filepath.Join(dir, "installation-go.json"), &config)
 	if e == nil {

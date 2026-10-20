@@ -71,6 +71,22 @@ services:
     cap_drop: [ALL]
     read_only: true
     tmpfs: [/tmp]
+  # Creates and persists VLAN interfaces with the host's own network stack (netplan, NetworkManager, ifupdown,
+  # network-scripts). It needs the host PID namespace and privileges, publishes nothing and is reachable only
+  # through the socket volume shared with the app. Remove this service to disable VLAN management.
+  netagent:
+    image: *app-image
+    command: [netagent]
+    restart: unless-stopped
+    privileged: true
+    pid: host
+    network_mode: none
+    read_only: true
+    environment:
+      AGENT_SOCKET: /run/vlan-agent/agent.sock
+      TINI_SUBREAPER: "1"
+    volumes:
+      - agent_socket:/run/vlan-agent
   app:
     image: *app-image
     network_mode: host
@@ -78,8 +94,10 @@ services:
     environment:
       APP_DATA_DIR: /var/lib/vlan-analizer
       MANAGED_CONFIG: /bootstrap/managed.json
+      NETWORK_AGENT_SOCKET: /run/vlan-agent/agent.sock
     volumes:
       - app_data:/var/lib/vlan-analizer
+      - agent_socket:/run/vlan-agent
       - bootstrap_data:/bootstrap:ro
       - /etc/resolv.conf:/etc/resolv.conf:ro
     depends_on:
@@ -102,6 +120,7 @@ volumes:
   clickhouse_users:
   clickhouse_data:
   bao_data:
+  agent_socket:
 networks:
   management:
     internal: true

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -40,13 +41,7 @@ func sameOrigin(r *http.Request, expected string) bool {
 }
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
-	assets, _ := fs.Sub(ui.Assets, "static")
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(assets))))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := fs.ReadFile(assets, "index.html")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(data)
-	})
+	mux.Handle("GET /", webApp())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, Object{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.RLock()
@@ -123,14 +118,46 @@ func (a *App) Handler() http.Handler {
 		respond(w, 200, a.scan)
 	}))
 	mux.HandleFunc("PUT /api/settings/monitoring", a.protected(true, true, a.monitoring))
+	mux.HandleFunc("GET /api/network/vlans", a.protected(true, false, a.networkVLANs))
+	mux.HandleFunc("POST /api/network/vlans", a.protected(true, true, a.createVLANs))
+	mux.HandleFunc("PUT /api/network/vlans/{name}", a.protected(true, true, a.updateVLAN))
+	mux.HandleFunc("DELETE /api/network/vlans/{name}", a.protected(true, true, a.deleteVLAN))
+	mux.HandleFunc("POST /api/network/vlans/{name}/{state}", a.protected(true, true, a.vlanState))
 	mux.HandleFunc("GET /api/integrations/zabbix", a.zabbix)
 	mux.HandleFunc("GET /api/integrations/zabbix/discovery", a.zabbix)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		mux.ServeHTTP(w, r)
+	})
+}
+
+// webApp serves the built React app: existing files as they are and index.html for client-side routes.
+func webApp() http.Handler {
+	dist, _ := fs.Sub(ui.Assets, "dist")
+	files := http.FileServer(http.FS(dist))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name == "api" || strings.HasPrefix(name, "api/") || strings.HasPrefix(name, "auth/") {
+			fail(w, 404, "not found")
+			return
+		}
+		if info, e := fs.Stat(dist, name); name != "" && name != "index.html" && e == nil && !info.IsDir() {
+			if strings.HasPrefix(name, "assets/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
+			files.ServeHTTP(w, r)
+			return
+		}
+		data, e := fs.ReadFile(dist, "index.html")
+		if e != nil {
+			http.Error(w, "the web app is not built; run npm run build in web/", 503)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(data)
 	})
 }
 func (a *App) protected(admin, write bool, fn func(http.ResponseWriter, *http.Request, Session)) http.HandlerFunc {
@@ -436,6 +463,8 @@ func (a *App) monitoring(w http.ResponseWriter, r *http.Request, u Session) {
 		fail(w, 422, "invalid scan parameters")
 		return
 	}
+	a.scanMu.Lock()
+	defer a.scanMu.Unlock()
 	a.mu.RLock()
 	vault := a.vault
 	a.mu.RUnlock()
