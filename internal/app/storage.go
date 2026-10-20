@@ -39,7 +39,7 @@ func managementDial(ctx context.Context, network, address string) (net.Conn, err
 	return dial.DialContext(ctx, network, address)
 }
 func httpClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: &http.Transport{Proxy: nil, DialContext: managementDial, MaxIdleConns: 64, MaxIdleConnsPerHost: 16}}
+	return &http.Client{Timeout: timeout, Transport: &http.Transport{Proxy: nil, DialContext: managementDial, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxConnsPerHost: 32, MaxIdleConns: 64, MaxIdleConnsPerHost: 16}}
 }
 func decodeJSON(data []byte, out any) error {
 	d := json.NewDecoder(bytes.NewReader(data))

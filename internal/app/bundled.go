@@ -69,6 +69,7 @@ func ensureBundle(ctx context.Context, dir, baoURL, chURL string) error {
 		return e
 	}
 	client := httpClient(10 * time.Second)
+	defer client.CloseIdleConnections()
 	call := func(method, path, token string, body, out any) (int, error) {
 		h := map[string]string{}
 		if token != "" {

@@ -321,6 +321,7 @@ func (a *App) Complete(ctx context.Context, form SetupForm) error {
 }
 func ProvisionRole(ctx context.Context, c BaoConfig, name string) (BaoConfig, error) {
 	client := httpClient(15 * time.Second)
+	defer client.CloseIdleConnections()
 	h := map[string]string{"X-Vault-Token": c.Token}
 	call := func(method, path string, value, out any) error {
 		_, e := requestJSON(ctx, client, method, c.URL+"/v1/"+path, h, value, out)
